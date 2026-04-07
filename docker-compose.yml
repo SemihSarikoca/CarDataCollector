@@ -1,0 +1,124 @@
+services:
+  # ===========================================
+  # Main Data Collector Bot
+  # ===========================================
+  collector:
+    build: .
+    container_name: car-data-collector
+    restart: unless-stopped
+    command: ["run"]
+    volumes:
+      # Data storage (external disk mount point)
+      - ./data:/data/car-collector
+      # Configuration
+      - ./config:/app/config:ro
+      # Logs
+      - ./logs:/app/logs
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      # Database
+      - DATABASE_URL=postgresql://collector:collector_pass@postgres:5432/car_collector
+      # Redis
+      - REDIS_URL=redis://redis:6379/0
+      # Ollama
+      - OLLAMA_URL=http://ollama:11434
+    ports:
+      - "5000:5000"  # Dashboard
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - collector-net
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: "4.0"
+        reservations:
+          memory: 2G
+          cpus: "1.0"
+
+  # ===========================================
+  # PostgreSQL Database
+  # ===========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: car-collector-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: car_collector
+      POSTGRES_USER: collector
+      POSTGRES_PASSWORD: collector_pass
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - collector-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U collector -d car_collector"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "1.0"
+
+  # ===========================================
+  # Redis Cache
+  # ===========================================
+  redis:
+    image: redis:7-alpine
+    container_name: car-collector-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - collector-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+  # ===========================================
+  # Ollama - LLM Server (Q/A Generation)
+  # Optional - can be started separately
+  # ===========================================
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: car-collector-ollama
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ollama-models:/root/.ollama
+  #   ports:
+  #     - "11434:11434"
+  #   networks:
+  #     - collector-net
+
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+  # ollama-models:
+  #   driver: local
+
+networks:
+  collector-net:
+    driver: bridge

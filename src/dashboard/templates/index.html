@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Car Data Collector - Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bs-body-bg: #f8f9fa;
+        }
+        .stat-card {
+            transition: transform 0.2s;
+        }
+        .stat-card:hover {
+            transform: translateY(-2px);
+        }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .status-active { background-color: #28a745; }
+        .status-idle { background-color: #ffc107; }
+        .status-error { background-color: #dc3545; }
+        .table-container {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .refresh-btn {
+            cursor: pointer;
+        }
+        .refresh-btn:hover {
+            opacity: 0.7;
+        }
+        pre.content-preview {
+            max-height: 200px;
+            overflow-y: auto;
+            background: #f1f3f4;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 0.85rem;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-car-front-fill me-2"></i>
+                Car Data Collector
+            </a>
+            <div class="navbar-text text-light">
+                <span id="lastUpdate">Last update: --</span>
+                <i class="bi bi-arrow-clockwise refresh-btn ms-2" onclick="refreshAll()" title="Refresh"></i>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid py-4">
+        <!-- Stats Cards -->
+        <div class="row g-4 mb-4">
+            <div class="col-md-3">
+                <div class="card stat-card h-100 border-primary">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6 class="text-muted mb-1">Total Documents</h6>
+                                <h3 class="mb-0" id="totalDocs">--</h3>
+                            </div>
+                            <i class="bi bi-file-text fs-1 text-primary opacity-50"></i>
+                        </div>
+                        <small class="text-muted">Unique: <span id="uniqueDocs">--</span></small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card h-100 border-success">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6 class="text-muted mb-1">Q&A Pairs</h6>
+                                <h3 class="mb-0" id="totalQA">--</h3>
+                            </div>
+                            <i class="bi bi-chat-dots fs-1 text-success opacity-50"></i>
+                        </div>
+                        <small class="text-muted">For fine-tuning</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card h-100 border-info">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6 class="text-muted mb-1">Active Sources</h6>
+                                <h3 class="mb-0" id="activeSources">--</h3>
+                            </div>
+                            <i class="bi bi-globe fs-1 text-info opacity-50"></i>
+                        </div>
+                        <small class="text-muted">of <span id="totalSources">13</span> configured</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card h-100 border-warning">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6 class="text-muted mb-1">Disk Usage</h6>
+                                <h3 class="mb-0" id="diskUsage">--%</h3>
+                            </div>
+                            <i class="bi bi-hdd fs-1 text-warning opacity-50"></i>
+                        </div>
+                        <small class="text-muted">Free: <span id="diskFree">--</span> GB</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="row g-4 mb-4">
+            <div class="col-md-8">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <i class="bi bi-graph-up me-2"></i>Scraping Trends (Last 7 Days)
+                    </div>
+                    <div class="card-body">
+                        <canvas id="trendsChart" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <i class="bi bi-pie-chart me-2"></i>Source Distribution
+                    </div>
+                    <div class="card-body">
+                        <canvas id="distributionChart" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sources and Data Row -->
+        <div class="row g-4">
+            <div class="col-md-5">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-list-check me-2"></i>Sources Status</span>
+                        <span class="badge bg-secondary" id="sourceCount">0</span>
+                    </div>
+                    <div class="card-body table-container p-0">
+                        <table class="table table-hover table-sm mb-0">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th>Source</th>
+                                    <th>Type</th>
+                                    <th>Status</th>
+                                    <th>Items</th>
+                                    <th>Last Scrape</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sourcesTable">
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted">Loading...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-7">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-database me-2"></i>Recent Data</span>
+                        <div class="d-flex gap-2">
+                            <select class="form-select form-select-sm" id="sourceFilter" style="width: auto;">
+                                <option value="">All Sources</option>
+                            </select>
+                            <input type="text" class="form-control form-control-sm" id="searchInput" 
+                                   placeholder="Search..." style="width: 150px;">
+                        </div>
+                    </div>
+                    <div class="card-body table-container p-0">
+                        <table class="table table-hover table-sm mb-0">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th>Title</th>
+                                    <th>Source</th>
+                                    <th>Category</th>
+                                    <th>Quality</th>
+                                    <th>Date</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dataTable">
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted">Loading...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="card-footer d-flex justify-content-between align-items-center">
+                        <small class="text-muted">Showing <span id="showingCount">0</span> of <span id="totalItems">0</span></small>
+                        <nav>
+                            <ul class="pagination pagination-sm mb-0" id="pagination">
+                            </ul>
+                        </nav>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Data Modal -->
+    <div class="modal fade" id="dataModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalTitle">Document Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <strong>Source:</strong> <span id="modalSource">--</span>
+                        </div>
+                        <div class="col-md-6">
+                            <strong>Category:</strong> <span id="modalCategory">--</span>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <strong>Quality Score:</strong> <span id="modalQuality">--</span>
+                        </div>
+                        <div class="col-md-6">
+                            <strong>Word Count:</strong> <span id="modalWords">--</span>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <strong>URL:</strong> 
+                        <a href="#" id="modalUrl" target="_blank" class="text-break">--</a>
+                    </div>
+                    <div>
+                        <strong>Content Preview:</strong>
+                        <pre class="content-preview mt-2" id="modalContent">--</pre>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Configuration
+        const REFRESH_INTERVAL = 30000; // 30 seconds
+        let trendsChart = null;
+        let distributionChart = null;
+        let currentPage = 1;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshAll();
+            setInterval(refreshAll, REFRESH_INTERVAL);
+        });
+
+        // Refresh all data
+        async function refreshAll() {
+            await Promise.all([
+                fetchStats(),
+                fetchSources(),
+                fetchData(),
+                fetchTrends(),
+                fetchDistribution()
+            ]);
+            document.getElementById('lastUpdate').textContent = 
+                'Last update: ' + new Date().toLocaleTimeString();
+        }
+
+        // Fetch statistics
+        async function fetchStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const stats = await response.json();
+                
+                document.getElementById('totalDocs').textContent = formatNumber(stats.total_documents);
+                document.getElementById('uniqueDocs').textContent = formatNumber(stats.unique_documents);
+                document.getElementById('totalQA').textContent = formatNumber(stats.total_qa_pairs);
+                document.getElementById('activeSources').textContent = stats.active_sources || 0;
+                document.getElementById('totalSources').textContent = stats.total_sources || 13;
+                document.getElementById('diskUsage').textContent = (stats.disk_usage_percent || 0).toFixed(1) + '%';
+                document.getElementById('diskFree').textContent = (stats.disk_free_gb || 0).toFixed(1);
+            } catch (error) {
+                console.error('Error fetching stats:', error);
+            }
+        }
+
+        // Fetch sources
+        async function fetchSources() {
+            try {
+                const response = await fetch('/api/sources');
+                const sources = await response.json();
+                
+                const tbody = document.getElementById('sourcesTable');
+                const filter = document.getElementById('sourceFilter');
+                
+                if (sources.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No sources configured</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = sources.map(source => `
+                    <tr>
+                        <td><strong>${source.name}</strong></td>
+                        <td><span class="badge bg-secondary">${source.type}</span></td>
+                        <td>
+                            <span class="status-dot status-${source.status}"></span>
+                            ${source.status}
+                        </td>
+                        <td>${formatNumber(source.total_items)}</td>
+                        <td>${source.last_scrape ? formatDate(source.last_scrape) : '--'}</td>
+                    </tr>
+                `).join('');
+                
+                document.getElementById('sourceCount').textContent = sources.length;
+                
+                // Update filter dropdown
+                const currentValue = filter.value;
+                filter.innerHTML = '<option value="">All Sources</option>' + 
+                    sources.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+                filter.value = currentValue;
+            } catch (error) {
+                console.error('Error fetching sources:', error);
+            }
+        }
+
+        // Fetch data
+        async function fetchData(page = 1) {
+            try {
+                currentPage = page;
+                const source = document.getElementById('sourceFilter').value;
+                const search = document.getElementById('searchInput').value;
+                
+                let url = `/api/data?page=${page}&per_page=20`;
+                if (source) url += `&source=${encodeURIComponent(source)}`;
+                if (search) url += `&search=${encodeURIComponent(search)}`;
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                const tbody = document.getElementById('dataTable');
+                
+                if (!data.items || data.items.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No data found</td></tr>';
+                    document.getElementById('showingCount').textContent = '0';
+                    document.getElementById('totalItems').textContent = '0';
+                    return;
+                }
+
+                tbody.innerHTML = data.items.map(item => `
+                    <tr onclick="showDataModal('${item.id}')" style="cursor: pointer;">
+                        <td class="text-truncate" style="max-width: 200px;" title="${escapeHtml(item.title)}">
+                            ${escapeHtml(item.title)}
+                        </td>
+                        <td><small>${item.source_name}</small></td>
+                        <td><span class="badge bg-info">${item.category}</span></td>
+                        <td>${item.quality_score ? item.quality_score.toFixed(0) : '--'}</td>
+                        <td><small>${formatDate(item.date_scraped)}</small></td>
+                    </tr>
+                `).join('');
+                
+                document.getElementById('showingCount').textContent = data.items.length;
+                document.getElementById('totalItems').textContent = formatNumber(data.total);
+                
+                // Update pagination
+                updatePagination(data.page, data.total_pages);
+            } catch (error) {
+                console.error('Error fetching data:', error);
+            }
+        }
+
+        // Fetch trends
+        async function fetchTrends() {
+            try {
+                const response = await fetch('/api/trends?days=7');
+                const trends = await response.json();
+                
+                const ctx = document.getElementById('trendsChart').getContext('2d');
+                
+                if (trendsChart) {
+                    trendsChart.destroy();
+                }
+                
+                trendsChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: trends.labels,
+                        datasets: [
+                            {
+                                label: 'Scraped',
+                                data: trends.scraped,
+                                borderColor: '#0d6efd',
+                                backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                                fill: true,
+                                tension: 0.3
+                            },
+                            {
+                                label: 'Q&A Generated',
+                                data: trends.qa_generated,
+                                borderColor: '#198754',
+                                backgroundColor: 'rgba(25, 135, 84, 0.1)',
+                                fill: true,
+                                tension: 0.3
+                            },
+                            {
+                                label: 'Duplicates',
+                                data: trends.duplicates,
+                                borderColor: '#dc3545',
+                                backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                                fill: true,
+                                tension: 0.3
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'top'
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Error fetching trends:', error);
+            }
+        }
+
+        // Fetch distribution
+        async function fetchDistribution() {
+            try {
+                const response = await fetch('/api/source-distribution');
+                const dist = await response.json();
+                
+                const ctx = document.getElementById('distributionChart').getContext('2d');
+                
+                if (distributionChart) {
+                    distributionChart.destroy();
+                }
+                
+                if (!dist.labels || dist.labels.length === 0) {
+                    return;
+                }
+                
+                distributionChart = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: dist.labels,
+                        datasets: [{
+                            data: dist.values,
+                            backgroundColor: [
+                                '#0d6efd', '#198754', '#ffc107', '#dc3545', 
+                                '#6f42c1', '#0dcaf0', '#fd7e14', '#20c997',
+                                '#6c757d', '#d63384', '#adb5bd', '#495057', '#212529'
+                            ]
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'right',
+                                labels: {
+                                    boxWidth: 12
+                                }
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Error fetching distribution:', error);
+            }
+        }
+
+        // Show data modal
+        async function showDataModal(id) {
+            try {
+                const response = await fetch(`/api/data/${id}`);
+                const item = await response.json();
+                
+                if (item.error) {
+                    return;
+                }
+                
+                document.getElementById('modalTitle').textContent = item.title || 'Untitled';
+                document.getElementById('modalSource').textContent = item.source_name;
+                document.getElementById('modalCategory').textContent = item.category;
+                document.getElementById('modalQuality').textContent = item.quality_score ? item.quality_score.toFixed(1) : '--';
+                document.getElementById('modalWords').textContent = formatNumber(item.word_count || 0);
+                document.getElementById('modalUrl').textContent = item.page_url;
+                document.getElementById('modalUrl').href = item.page_url;
+                document.getElementById('modalContent').textContent = item.content_text ? 
+                    item.content_text.substring(0, 2000) + (item.content_text.length > 2000 ? '...' : '') : '--';
+                
+                const modal = new bootstrap.Modal(document.getElementById('dataModal'));
+                modal.show();
+            } catch (error) {
+                console.error('Error fetching item:', error);
+            }
+        }
+
+        // Update pagination
+        function updatePagination(current, total) {
+            const pagination = document.getElementById('pagination');
+            
+            if (total <= 1) {
+                pagination.innerHTML = '';
+                return;
+            }
+            
+            let html = '';
+            
+            // Previous
+            html += `<li class="page-item ${current === 1 ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="fetchData(${current - 1})">&laquo;</a>
+            </li>`;
+            
+            // Pages
+            for (let i = Math.max(1, current - 2); i <= Math.min(total, current + 2); i++) {
+                html += `<li class="page-item ${i === current ? 'active' : ''}">
+                    <a class="page-link" href="#" onclick="fetchData(${i})">${i}</a>
+                </li>`;
+            }
+            
+            // Next
+            html += `<li class="page-item ${current === total ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="fetchData(${current + 1})">&raquo;</a>
+            </li>`;
+            
+            pagination.innerHTML = html;
+        }
+
+        // Utility functions
+        function formatNumber(num) {
+            if (num === undefined || num === null) return '--';
+            return num.toLocaleString();
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '--';
+            const date = new Date(dateStr);
+            return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Event listeners
+        document.getElementById('sourceFilter').addEventListener('change', () => fetchData(1));
+        document.getElementById('searchInput').addEventListener('keyup', function(e) {
+            if (e.key === 'Enter') {
+                fetchData(1);
+            }
+        });
+    </script>
+</body>
+</html>

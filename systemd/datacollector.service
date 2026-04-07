@@ -1,0 +1,40 @@
+[Unit]
+Description=Car Data Collector Bot - Otomobil Veri Toplama Sistemi
+Documentation=https://github.com/your-repo/datacollectorbot
+After=network.target ollama.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=datacollector
+Group=datacollector
+WorkingDirectory=/opt/datacollectorbot
+ExecStart=/opt/datacollectorbot/venv/bin/python -m src.main run --config /opt/datacollectorbot/config/settings.yaml
+ExecStop=/bin/kill -SIGTERM $MAINPID
+Restart=always
+RestartSec=30
+TimeoutStopSec=60
+
+# Ortam
+Environment=PYTHONPATH=/opt/datacollectorbot
+Environment=PYTHONUNBUFFERED=1
+
+# Güvenlik
+ProtectSystem=strict
+ReadWritePaths=/data/car-collector /opt/datacollectorbot/logs
+PrivateTmp=true
+NoNewPrivileges=true
+
+# Kaynak limitleri
+LimitNOFILE=65536
+LimitNPROC=4096
+MemoryMax=4G
+CPUQuota=200%
+
+# Log
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=car-collector
+
+[Install]
+WantedBy=multi-user.target

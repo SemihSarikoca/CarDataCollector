@@ -1,0 +1,492 @@
+# =============================================================================
+# CAR DATA COLLECTOR BOT - Main Configuration
+# =============================================================================
+# English automotive forums and technical sites data collection system
+# For fine-tuning training dataset preparation
+
+# -----------------------------------------------------------------------------
+# General Settings
+# -----------------------------------------------------------------------------
+general:
+  project_name: "car-data-collector"
+  language: "en"  # Primary language
+  log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  log_dir: "logs"
+  max_workers: 4  # Concurrent scraper count
+  round_delay_seconds: 43200  # 12 hours between rounds
+  politeness_delay_seconds: 3  # Delay between requests
+  request_timeout_seconds: 60
+  max_retries: 3
+  # Rotating user agents enabled - see user_agents section
+
+# -----------------------------------------------------------------------------
+# User Agent Rotation
+# -----------------------------------------------------------------------------
+user_agents:
+  enabled: true
+  rotate_per_request: false  # Rotate per session, not per request
+  agents:
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0"
+    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3.1 Safari/605.1.15"
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0"
+    - "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+
+# -----------------------------------------------------------------------------
+# Storage Settings
+# -----------------------------------------------------------------------------
+storage:
+  base_path: "/data/car-collector"
+  raw_html_dir: "raw/html"
+  raw_pdf_dir: "raw/pdf"
+  processed_dir: "processed"
+  qa_output_dir: "qa_output"
+  temp_dir: "temp"
+  max_file_size_mb: 50
+  disk_warning_threshold_percent: 90
+
+# -----------------------------------------------------------------------------
+# Database Settings (PostgreSQL)
+# -----------------------------------------------------------------------------
+database:
+  # Connection settings from environment variable DATABASE_URL
+  pool_size: 10
+  max_overflow: 20
+  pool_timeout: 30
+  pool_recycle: 1800  # Recycle connections every 30 minutes
+
+# -----------------------------------------------------------------------------
+# Redis Cache Settings
+# -----------------------------------------------------------------------------
+redis:
+  # Connection from environment variable REDIS_URL
+  duplicate_cache_ttl: 86400  # 24 hours
+  url_cache_ttl: 3600  # 1 hour
+  max_connections: 20
+
+# -----------------------------------------------------------------------------
+# Cloudflare Bypass Settings
+# -----------------------------------------------------------------------------
+cloudflare:
+  enabled: true
+  # Use playwright-stealth for JS-heavy sites
+  use_playwright: true
+  # Fallback to cloudscraper if playwright fails
+  use_cloudscraper: true
+  # Random delays to appear human
+  min_delay: 2.0
+  max_delay: 5.0
+  # Retry on block
+  max_retries: 3
+  retry_delay: 60
+
+# -----------------------------------------------------------------------------
+# Playwright Settings
+# -----------------------------------------------------------------------------
+playwright:
+  headless: true
+  browser: "chromium"
+  # Browser pool for concurrent scraping
+  pool_size: 4
+  # Page timeout
+  timeout: 60000
+  # Wait for network idle before extracting
+  wait_for_network_idle: true
+  # Stealth mode settings
+  stealth:
+    enabled: true
+    hide_webdriver: true
+    hide_automation: true
+    random_viewport: true
+
+# -----------------------------------------------------------------------------
+# Deduplication Settings
+# -----------------------------------------------------------------------------
+deduplication:
+  similarity_threshold: 0.85
+  simhash_bits: 128
+  minhash_permutations: 128
+  ngram_size: 3
+  batch_size: 1000
+  # Use Redis for fast duplicate lookup
+  use_redis_cache: true
+
+# -----------------------------------------------------------------------------
+# Quality Control Settings
+# -----------------------------------------------------------------------------
+quality:
+  # Minimum content requirements
+  min_content_length: 100  # characters
+  min_word_count: 20
+  # Language detection
+  enforce_english: true
+  # Spam detection keywords
+  spam_keywords:
+    - "click here"
+    - "buy now"
+    - "limited offer"
+    - "subscribe now"
+    - "follow us"
+  # LLM quality scoring
+  llm_scoring:
+    enabled: true
+    min_score_to_keep: 40  # 0-100
+
+# -----------------------------------------------------------------------------
+# Q/A Generator (LLM) Settings
+# -----------------------------------------------------------------------------
+qa_generator:
+  model: "gemma12b"
+  ollama_url: "http://ollama:11434"
+  ollama_model_name: "gemma3:12b"
+  fallback_model_name: "qwen2.5:14b"
+  batch_size: 5
+  max_qa_per_document: 20
+  min_qa_per_document: 3
+  temperature: 0.3
+  max_tokens: 4096
+  system_prompt: |
+    You are an automotive technical expert. From the given English automotive
+    technical text or forum discussion, generate high-quality question-answer
+    pairs for LLM fine-tuning.
+    
+    Rules:
+    1. Questions should be in natural English
+    2. Answers must be technically accurate and detailed
+    3. Each Q/A pair should be independently understandable
+    4. Include make, model, year information if available
+    5. Focus on specific technical details rather than general information
+    6. Return in JSON format: [{"question": "...", "answer": "..."}]
+
+# -----------------------------------------------------------------------------
+# Source Definitions - English Automotive Sites
+# -----------------------------------------------------------------------------
+sources:
+  # =========================================================================
+  # FORUMS - High Priority
+  # =========================================================================
+  - name: "reddit_mechanicadvice"
+    type: "forum"
+    enabled: true
+    base_url: "https://www.reddit.com"
+    start_urls:
+      - "https://www.reddit.com/r/MechanicAdvice/top/?t=all"
+      - "https://www.reddit.com/r/MechanicAdvice/new/"
+    category: "forum"
+    priority: 1
+    rate_limit: 2.0
+    scrape_interval_hours: 6
+    max_pages_per_round: 500
+    use_playwright: true
+    cloudflare_protected: false
+    selectors:
+      thread_list: "a[data-testid='post-title']"
+      thread_title: "h1"
+      post_content: "div[data-testid='post-content']"
+      post_author: "a[data-testid='post-author-link']"
+      post_date: "time"
+      comment_content: "div[data-testid='comment']"
+      pagination_next: "button:has-text('Next')"
+
+  - name: "reddit_cartalk"
+    type: "forum"
+    enabled: true
+    base_url: "https://www.reddit.com"
+    start_urls:
+      - "https://www.reddit.com/r/Cartalk/top/?t=all"
+      - "https://www.reddit.com/r/Cartalk/new/"
+    category: "forum"
+    priority: 1
+    rate_limit: 2.0
+    scrape_interval_hours: 6
+    max_pages_per_round: 500
+    use_playwright: true
+    cloudflare_protected: false
+    selectors:
+      thread_list: "a[data-testid='post-title']"
+      thread_title: "h1"
+      post_content: "div[data-testid='post-content']"
+      comment_content: "div[data-testid='comment']"
+
+  - name: "bobistheoilguy"
+    type: "forum"
+    enabled: true
+    base_url: "https://bobistheoilguy.com"
+    start_urls:
+      - "https://bobistheoilguy.com/forums/"
+    category: "forum"
+    priority: 2
+    rate_limit: 5.0
+    scrape_interval_hours: 12
+    max_pages_per_round: 300
+    use_playwright: true
+    cloudflare_protected: true
+    selectors:
+      forum_list: "a.forumtitle"
+      thread_list: "a.topictitle"
+      thread_title: "h2.topic-title"
+      post_content: "div.content"
+      post_author: "a.username"
+      post_date: "time"
+      pagination_next: "a.arrow.next"
+
+  - name: "automotiveforums"
+    type: "forum"
+    enabled: true
+    base_url: "https://www.automotiveforums.com"
+    start_urls:
+      - "https://www.automotiveforums.com/forums/"
+    category: "forum"
+    priority: 3
+    rate_limit: 5.0
+    scrape_interval_hours: 12
+    max_pages_per_round: 200
+    use_playwright: false
+    cloudflare_protected: false
+    selectors:
+      thread_list: "a.topic-title"
+      thread_title: "h1.entry-title"
+      post_content: "div.post-body"
+      pagination_next: "a.next"
+
+  - name: "cargurus_forum"
+    type: "forum"
+    enabled: true
+    base_url: "https://www.cargurus.com"
+    start_urls:
+      - "https://www.cargurus.com/Cars/Discussion-General"
+    category: "forum"
+    priority: 2
+    rate_limit: 5.0
+    scrape_interval_hours: 12
+    max_pages_per_round: 300
+    use_playwright: true
+    cloudflare_protected: true
+    selectors:
+      thread_list: "a.discussion-title"
+      thread_title: "h1.discussion-title"
+      post_content: "div.discussion-body"
+      pagination_next: "a.next-page"
+
+  # =========================================================================
+  # TECHNICAL/REPAIR SITES
+  # =========================================================================
+  - name: "repairpal"
+    type: "technical"
+    enabled: true
+    base_url: "https://repairpal.com"
+    start_urls:
+      - "https://repairpal.com/symptoms"
+      - "https://repairpal.com/problems"
+      - "https://repairpal.com/estimates"
+    category: "technical"
+    priority: 1
+    rate_limit: 5.0
+    scrape_interval_hours: 24
+    max_pages_per_round: 500
+    use_playwright: true
+    cloudflare_protected: true
+    selectors:
+      article_list: "a.symptom-link, a.problem-link"
+      article_title: "h1"
+      article_content: "div.article-content, div.symptom-content"
+      pagination_next: "a.next"
+
+  - name: "carcarekiosk"
+    type: "technical"
+    enabled: true
+    base_url: "https://www.carcarekiosk.com"
+    start_urls:
+      - "https://www.carcarekiosk.com/video"
+    category: "technical"
+    priority: 2
+    rate_limit: 5.0
+    scrape_interval_hours: 24
+    max_pages_per_round: 300
+    use_playwright: false
+    cloudflare_protected: false
+    selectors:
+      article_list: "a.video-link"
+      article_title: "h1.video-title"
+      article_content: "div.video-description"
+      pagination_next: "a.next"
+
+  - name: "autozone_guides"
+    type: "technical"
+    enabled: true
+    base_url: "https://www.autozone.com"
+    start_urls:
+      - "https://www.autozone.com/diy/repair-guides"
+    category: "technical"
+    priority: 2
+    rate_limit: 5.0
+    scrape_interval_hours: 24
+    max_pages_per_round: 400
+    use_playwright: true
+    cloudflare_protected: true
+    selectors:
+      article_list: "a.guide-link"
+      article_title: "h1"
+      article_content: "div.guide-content"
+      pagination_next: "a.next"
+
+  # =========================================================================
+  # COMPLAINT/ISSUE DATABASES
+  # =========================================================================
+  - name: "carcomplaints"
+    type: "technical"
+    enabled: true
+    base_url: "https://www.carcomplaints.com"
+    start_urls:
+      - "https://www.carcomplaints.com/top_vehicles/"
+      - "https://www.carcomplaints.com/problems/"
+    category: "complaints"
+    priority: 1
+    rate_limit: 3.0
+    scrape_interval_hours: 48
+    max_pages_per_round: 500
+    use_playwright: true
+    cloudflare_protected: true
+    selectors:
+      article_list: "a.complaint-link"
+      article_title: "h1"
+      article_content: "div.complaint-details"
+      pagination_next: "a.next"
+
+  - name: "nhtsa"
+    type: "technical"
+    enabled: true
+    base_url: "https://www.nhtsa.gov"
+    start_urls:
+      - "https://www.nhtsa.gov/recalls-complaints/complaints"
+    category: "complaints"
+    priority: 1
+    rate_limit: 3.0
+    scrape_interval_hours: 48
+    max_pages_per_round: 300
+    use_playwright: true
+    cloudflare_protected: false
+    selectors:
+      article_list: "a.complaint-row"
+      article_title: "h1"
+      article_content: "div.complaint-text"
+      pagination_next: "a.next"
+
+  # =========================================================================
+  # SPECS & REVIEWS
+  # =========================================================================
+  - name: "motortrend"
+    type: "content"
+    enabled: true
+    base_url: "https://www.motortrend.com"
+    start_urls:
+      - "https://www.motortrend.com/how-to/"
+      - "https://www.motortrend.com/features/"
+    category: "content"
+    priority: 3
+    rate_limit: 5.0
+    scrape_interval_hours: 48
+    max_pages_per_round: 200
+    use_playwright: true
+    cloudflare_protected: true
+    selectors:
+      article_list: "a.article-card"
+      article_title: "h1.article-title"
+      article_content: "div.article-body"
+      article_date: "time"
+      pagination_next: "a.next"
+
+  - name: "caranddriver"
+    type: "content"
+    enabled: true
+    base_url: "https://www.caranddriver.com"
+    start_urls:
+      - "https://www.caranddriver.com/features/"
+      - "https://www.caranddriver.com/columns/"
+    category: "content"
+    priority: 3
+    rate_limit: 5.0
+    scrape_interval_hours: 48
+    max_pages_per_round: 200
+    use_playwright: true
+    cloudflare_protected: true
+    selectors:
+      article_list: "a.article-link"
+      article_title: "h1"
+      article_content: "article"
+      article_date: "time"
+      pagination_next: "a.next"
+
+  # =========================================================================
+  # Q&A SITES
+  # =========================================================================
+  - name: "2carpros"
+    type: "qa"
+    enabled: true
+    base_url: "https://www.2carpros.com"
+    start_urls:
+      - "https://www.2carpros.com/questions"
+    category: "qa"
+    priority: 1
+    rate_limit: 5.0
+    scrape_interval_hours: 12
+    max_pages_per_round: 500
+    use_playwright: false
+    cloudflare_protected: false
+    selectors:
+      thread_list: "a.question-link"
+      thread_title: "h1.question-title"
+      post_content: "div.question-body"
+      answer_content: "div.answer-body"
+      pagination_next: "a.next"
+
+# -----------------------------------------------------------------------------
+# Pipeline Settings
+# -----------------------------------------------------------------------------
+pipeline:
+  stages:
+    - name: "scrape"
+      enabled: true
+      max_concurrent: 4
+    - name: "store"
+      enabled: true
+    - name: "deduplicate"
+      enabled: true
+    - name: "quality_check"
+      enabled: true
+    - name: "generate_qa"
+      enabled: true
+      min_documents_to_start: 100
+
+  auto_restart: true
+  error_backoff_seconds: 300
+  health_check_interval: 60
+
+# -----------------------------------------------------------------------------
+# Dashboard Settings
+# -----------------------------------------------------------------------------
+dashboard:
+  enabled: true
+  host: "0.0.0.0"
+  port: 5000
+  debug: false
+  # Auto-refresh interval in seconds
+  refresh_interval: 30
+
+# -----------------------------------------------------------------------------
+# Monitoring
+# -----------------------------------------------------------------------------
+monitoring:
+  stats_interval: 300
+  prometheus_enabled: true
+  prometheus_port: 9090
+  # Webhook notifications (Discord, Slack, etc.)
+  webhook_url: ""
+  # Email alerts
+  email_enabled: false
+  smtp_host: ""
+  smtp_port: 587
+  smtp_user: ""
+  smtp_pass: ""
+  alert_email: ""

@@ -9,6 +9,7 @@ import hashlib
 import random
 from abc import ABC, abstractmethod
 from datetime import datetime
+from pathlib import Path
 from typing import AsyncGenerator, Optional
 from urllib.parse import urljoin, urlparse
 
@@ -72,9 +73,16 @@ class BaseScraper(ABC):
         """Initialize session and bypass handlers"""
         # Initialize Cloudflare bypass if needed
         if self.use_playwright or self.cloudflare_protected:
-            self._cloudflare_bypass = CloudflareBypass(self.global_config)
+            # Per-source cookie jar so different domains don't cross-contaminate
+            # and so we can keep one site's solved Cloudflare state warm even
+            # if another's expires.
+            storage_cfg = self.global_config.get("storage", {})
+            base_path = Path(storage_cfg.get("base_path", "./data"))
+            state_path = base_path / "cookies" / f"{self.name}.json"
+
+            self._cloudflare_bypass = CloudflareBypass(self.global_config, state_path=state_path)
             await self._cloudflare_bypass.initialize()
-            logger.info("cloudflare_bypass_started", source=self.name)
+            logger.info("cloudflare_bypass_started", source=self.name, state_path=str(state_path))
         
         # Initialize aiohttp session for simple requests
         if self._session is None or self._session.closed:

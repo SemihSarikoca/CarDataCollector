@@ -23,6 +23,8 @@ from src.scrapers.sources.shiftdelete import ShiftDeleteScraper
 from src.scrapers.sources.sekizsilindir import SekizSilindirScraper
 from src.scrapers.sources.otopark import OtoparkScraper
 from src.scrapers.sources.generic import GenericContentScraper, GenericForumScraper
+from src.scrapers.sources.reddit_api import RedditAPIScraper
+from src.scrapers.sources.nhtsa_api import NHTSAAPIScraper
 from src.storage import StorageManager
 from src.utils.helpers import get_disk_usage
 from src.utils.logger import get_logger
@@ -36,6 +38,9 @@ CUSTOM_SCRAPERS = {
     "shiftdelete_otomobil": ShiftDeleteScraper,
     "sekizsilindir": SekizSilindirScraper,
     "otopark": OtoparkScraper,
+    "reddit_mechanicadvice": RedditAPIScraper,
+    "reddit_cartalk": RedditAPIScraper,
+    "nhtsa": NHTSAAPIScraper,
 }
 
 

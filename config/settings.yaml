@@ -37,7 +37,7 @@ user_agents:
 # Storage Settings
 # -----------------------------------------------------------------------------
 storage:
-  base_path: "/data/car-collector"
+  base_path: "./data"
   raw_html_dir: "raw/html"
   raw_pdf_dir: "raw/pdf"
   processed_dir: "processed"
@@ -177,8 +177,8 @@ sources:
     priority: 1
     rate_limit: 2.0
     scrape_interval_hours: 6
-    max_pages_per_round: 500
-    use_playwright: true
+    max_pages_per_round: 200
+    use_playwright: false
     cloudflare_protected: false
     selectors:
       thread_list: "a[data-testid='post-title']"
@@ -200,8 +200,8 @@ sources:
     priority: 1
     rate_limit: 2.0
     scrape_interval_hours: 6
-    max_pages_per_round: 500
-    use_playwright: true
+    max_pages_per_round: 200
+    use_playwright: false
     cloudflare_protected: false
     selectors:
       thread_list: "a[data-testid='post-title']"
@@ -357,21 +357,42 @@ sources:
   - name: "nhtsa"
     type: "technical"
     enabled: true
-    base_url: "https://www.nhtsa.gov"
+    base_url: "https://api.nhtsa.gov"
+    # NHTSA scraper uses the official JSON API; start_urls are ignored.
     start_urls:
-      - "https://www.nhtsa.gov/recalls-complaints/complaints"
+      - "https://api.nhtsa.gov/"
     category: "complaints"
     priority: 1
-    rate_limit: 3.0
-    scrape_interval_hours: 48
-    max_pages_per_round: 300
-    use_playwright: true
+    rate_limit: 1.0
+    scrape_interval_hours: 168  # weekly — NHTSA data does not change rapidly
+    max_pages_per_round: 200
+    use_playwright: false
     cloudflare_protected: false
-    selectors:
-      article_list: "a.complaint-row"
-      article_title: "h1"
-      article_content: "div.complaint-text"
-      pagination_next: "a.next"
+    selectors: {}
+    metadata:
+      # Each vehicle yields up to 3 documents (complaints / recalls / investigations).
+      # Add or replace as needed.
+      vehicles:
+        - {make: Toyota,    model: Camry,     year: 2018}
+        - {make: Toyota,    model: Corolla,   year: 2019}
+        - {make: Toyota,    model: RAV4,      year: 2020}
+        - {make: Honda,     model: Civic,     year: 2018}
+        - {make: Honda,     model: Accord,    year: 2019}
+        - {make: Honda,     model: CR-V,      year: 2020}
+        - {make: Ford,      model: F-150,     year: 2018}
+        - {make: Ford,      model: Escape,    year: 2019}
+        - {make: Ford,      model: Explorer,  year: 2020}
+        - {make: Chevrolet, model: Silverado, year: 2018}
+        - {make: Chevrolet, model: Equinox,   year: 2019}
+        - {make: Nissan,    model: Altima,    year: 2018}
+        - {make: Nissan,    model: Rogue,     year: 2019}
+        - {make: Hyundai,   model: Elantra,   year: 2018}
+        - {make: Hyundai,   model: Sonata,    year: 2019}
+        - {make: Kia,       model: Optima,    year: 2018}
+        - {make: Subaru,    model: Outback,   year: 2019}
+        - {make: Jeep,      model: Wrangler,  year: 2018}
+        - {make: BMW,       model: 328i,      year: 2014}
+        - {make: Volkswagen,model: Jetta,     year: 2018}
 
   # =========================================================================
   # SPECS & REVIEWS

@@ -5,12 +5,20 @@ Handles Cloudflare protection, bot detection, and anti-scraping measures.
 
 import asyncio
 import random
+from pathlib import Path
 from typing import Optional, Tuple
 from urllib.parse import urlparse
 
 import cloudscraper
-from playwright.async_api import async_playwright, Browser, BrowserContext, Page
-from playwright_stealth import stealth_async
+
+# Prefer patchright (playwright fork with built-in stealth); gracefully fall back
+# to upstream playwright if patchright isn't installed in the environment.
+try:  # pragma: no cover - runtime import guard
+    from patchright.async_api import async_playwright, Browser, BrowserContext, Page  # type: ignore
+    PATCHRIGHT_AVAILABLE = True
+except ModuleNotFoundError:  # pragma: no cover
+    from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+    PATCHRIGHT_AVAILABLE = False
 
 from src.utils.logger import get_logger
 
@@ -23,11 +31,11 @@ class CloudflareBypass:
     Uses Playwright with stealth mode as primary, cloudscraper as fallback.
     """
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, state_path: Optional[Path] = None):
         self.config = config.get("cloudflare", {})
         self.playwright_config = config.get("playwright", {})
         self.user_agents = config.get("user_agents", {}).get("agents", [])
-        
+
         self.enabled = self.config.get("enabled", True)
         self.use_playwright = self.config.get("use_playwright", True)
         self.use_cloudscraper = self.config.get("use_cloudscraper", True)
@@ -35,7 +43,12 @@ class CloudflareBypass:
         self.max_delay = self.config.get("max_delay", 5.0)
         self.max_retries = self.config.get("max_retries", 3)
         self.retry_delay = self.config.get("retry_delay", 60)
-        
+
+        # Cookie / storage state persistence: when set, the browser context's
+        # cookies + localStorage are loaded from this path on init and saved
+        # back on close (and after a successful Cloudflare challenge).
+        self.state_path: Optional[Path] = Path(state_path) if state_path else None
+
         self._playwright = None
         self._browser: Optional[Browser] = None
         self._context: Optional[BrowserContext] = None
@@ -65,26 +78,26 @@ class CloudflareBypass:
             try:
                 self._playwright = await async_playwright().start()
                 
-                # Launch browser with stealth options
+                # patchright applies stealth patches automatically; we should
+                # NOT pass --disable-blink-features=AutomationControlled (it
+                # actually un-does some of patchright's stealth fixes).
                 self._browser = await self._playwright.chromium.launch(
                     headless=self.playwright_config.get("headless", True),
                     args=[
-                        "--disable-blink-features=AutomationControlled",
                         "--disable-dev-shm-usage",
                         "--no-sandbox",
                         "--disable-setuid-sandbox",
                         "--disable-infobars",
-                        "--window-position=0,0",
-                        "--ignore-certifcate-errors",
-                        "--ignore-certifcate-errors-spki-list",
-                    ]
+                    ],
                 )
                 
                 self._current_user_agent = self._get_random_user_agent()
                 viewport = self._get_random_viewport()
-                
-                # Create context with stealth settings
-                self._context = await self._browser.new_context(
+
+                # Reuse persisted cookies / storage state if available.
+                # This lets us skip Cloudflare challenges on subsequent runs
+                # for as long as the cookies remain valid (typically hours).
+                context_kwargs = dict(
                     user_agent=self._current_user_agent,
                     viewport=viewport,
                     locale="en-US",
@@ -92,8 +105,19 @@ class CloudflareBypass:
                     permissions=["geolocation"],
                     java_script_enabled=True,
                 )
-                
-                logger.info("playwright_initialized", user_agent=self._current_user_agent[:50])
+                state_loaded = False
+                if self.state_path and self.state_path.exists() and self.state_path.stat().st_size > 0:
+                    context_kwargs["storage_state"] = str(self.state_path)
+                    state_loaded = True
+
+                self._context = await self._browser.new_context(**context_kwargs)
+
+                logger.info(
+                    "playwright_initialized",
+                    user_agent=self._current_user_agent[:50],
+                    state_loaded=state_loaded,
+                    state_path=str(self.state_path) if self.state_path else None,
+                )
                 
             except Exception as e:
                 logger.error("playwright_init_failed", error=str(e))
@@ -113,9 +137,23 @@ class CloudflareBypass:
                 logger.error("cloudscraper_init_failed", error=str(e))
                 self.use_cloudscraper = False
 
+    async def save_state(self) -> bool:
+        """Persist cookies + storage state to disk for reuse on next run."""
+        if not self._context or not self.state_path:
+            return False
+        try:
+            self.state_path.parent.mkdir(parents=True, exist_ok=True)
+            await self._context.storage_state(path=str(self.state_path))
+            logger.debug("storage_state_saved", path=str(self.state_path))
+            return True
+        except Exception as e:
+            logger.warning("storage_state_save_failed", path=str(self.state_path), error=str(e))
+            return False
+
     async def close(self):
-        """Clean up resources"""
+        """Clean up resources, persisting cookies first if configured."""
         if self._context:
+            await self.save_state()
             await self._context.close()
         if self._browser:
             await self._browser.close()
@@ -139,28 +177,11 @@ class CloudflareBypass:
         page: Optional[Page] = None
         try:
             page = await self._context.new_page()
-            
-            # Apply stealth mode
-            await stealth_async(page)
-            
-            # Add random mouse movements and scrolling behavior
-            await page.add_init_script("""
-                // Override webdriver detection
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-                
-                // Override plugins
-                Object.defineProperty(navigator, 'plugins', {
-                    get: () => [1, 2, 3, 4, 5]
-                });
-                
-                // Override languages
-                Object.defineProperty(navigator, 'languages', {
-                    get: () => ['en-US', 'en']
-                });
-            """)
-            
+
+            # patchright already provides webdriver/plugins/languages overrides;
+            # custom init scripts on top of it tend to leak detectable artifacts,
+            # so we skip them.
+
             # Navigate with timeout
             timeout = self.playwright_config.get("timeout", 60000)
             response = await page.goto(
@@ -175,7 +196,9 @@ class CloudflareBypass:
             status = response.status
             
             # Check for Cloudflare challenge
+            challenge_seen = False
             if status == 403 or "cloudflare" in (await page.title()).lower():
+                challenge_seen = True
                 logger.warning("cloudflare_challenge_detected", url=url)
                 # Wait for challenge to resolve
                 await asyncio.sleep(5)
@@ -197,8 +220,14 @@ class CloudflareBypass:
             
             # Simulate human behavior
             await self._simulate_human_behavior(page)
-            
+
             content = await page.content()
+
+            # If we just cleared a challenge, persist cookies immediately so
+            # the bypass survives a crash before close() runs.
+            if challenge_seen and self.state_path:
+                await self.save_state()
+
             return content, status
             
         except Exception as e:

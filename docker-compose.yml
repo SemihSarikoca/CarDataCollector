@@ -24,7 +24,7 @@ services:
       # Ollama
       - OLLAMA_URL=http://ollama:11434
     ports:
-      - "5000:5000"  # Dashboard
+      - "5001:5000"  # Dashboard
     depends_on:
       postgres:
         condition: service_healthy

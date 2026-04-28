@@ -120,7 +120,7 @@ class DatabaseManager:
             -- Ziyaret edilen URL log
             CREATE TABLE IF NOT EXISTS visited_urls (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                url_hash TEXT NOT NULL,
+                url_hash TEXT NOT NULL UNIQUE,
                 url TEXT NOT NULL,
                 source_name TEXT NOT NULL,
                 last_visited TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

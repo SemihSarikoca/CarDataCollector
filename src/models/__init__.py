@@ -152,6 +152,7 @@ class SourceConfig(BaseModel):
     use_playwright: bool = False
     cloudflare_protected: bool = False
     selectors: dict[str, str] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class RoundStats(BaseModel):

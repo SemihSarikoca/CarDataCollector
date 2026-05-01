@@ -1,584 +1,710 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-bs-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Car Data Collector - Dashboard</title>
+    <title>Car Data Collector — Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
         :root {
-            --bs-body-bg: #f8f9fa;
+            --bg-soft: #f6f8fb;
+            --card-shadow: 0 1px 2px rgba(15,23,42,.06), 0 1px 3px rgba(15,23,42,.05);
         }
-        .stat-card {
-            transition: transform 0.2s;
-        }
-        .stat-card:hover {
-            transform: translateY(-2px);
-        }
-        .status-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            display: inline-block;
-        }
-        .status-active { background-color: #28a745; }
-        .status-idle { background-color: #ffc107; }
-        .status-error { background-color: #dc3545; }
-        .table-container {
-            max-height: 400px;
-            overflow-y: auto;
-        }
-        .refresh-btn {
-            cursor: pointer;
-        }
-        .refresh-btn:hover {
-            opacity: 0.7;
-        }
+        body { background: var(--bg-soft); }
+        .navbar-brand i { color: #0d6efd; }
+        .stat-card { border: 0; box-shadow: var(--card-shadow); transition: transform .15s; }
+        .stat-card:hover { transform: translateY(-2px); }
+        .stat-card .stat-value { font-size: 1.75rem; font-weight: 600; line-height: 1.1; }
+        .stat-card .stat-label { color: #6c757d; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
+        .stat-card i.stat-icon { font-size: 2rem; opacity: .25; }
+        .card { border: 0; box-shadow: var(--card-shadow); }
+        .card-header { background: #fff; border-bottom: 1px solid #eef0f3; font-weight: 500; }
+        .table-container { max-height: 480px; overflow-y: auto; }
+        .table-sm td, .table-sm th { padding: .45rem .6rem; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; vertical-align: middle; }
+        .status-active { background: #198754; }
+        .status-idle   { background: #adb5bd; }
+        .status-error  { background: #dc3545; }
+        .status-running{ background: #0d6efd; animation: pulse 1.4s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
         pre.content-preview {
-            max-height: 200px;
-            overflow-y: auto;
-            background: #f1f3f4;
-            padding: 10px;
-            border-radius: 5px;
-            font-size: 0.85rem;
+            max-height: 360px; overflow-y: auto; background: #f1f3f4;
+            padding: 12px; border-radius: 6px; font-size: .85rem;
+            white-space: pre-wrap; word-break: break-word;
         }
+        .qa-card { border-left: 3px solid #0d6efd; padding: 10px 14px; margin-bottom: 10px; background: #f8fafc; border-radius: 4px; }
+        .qa-card .q { font-weight: 600; margin-bottom: 4px; color: #0f172a; }
+        .qa-card .a { color: #334155; font-size: .92rem; white-space: pre-wrap; }
+        .qa-card .meta { color: #94a3b8; font-size: .75rem; margin-top: 6px; }
+        .nav-tabs .nav-link { color: #475569; }
+        .nav-tabs .nav-link.active { color: #0d6efd; font-weight: 500; }
+        .system-pill { font-size: .75rem; padding: .2rem .5rem; border-radius: 999px; }
+        .system-pill.ok   { background: #d1fae5; color: #065f46; }
+        .system-pill.bad  { background: #fee2e2; color: #991b1b; }
+        .badge-soft       { background: #e2e8f0; color: #475569; }
+        .clickable-row { cursor: pointer; }
+        .clickable-row:hover { background: #f1f5f9; }
+        .pagination-sm .page-link { padding: .25rem .5rem; }
+        .ollama-models { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; }
+        textarea[readonly] { background: #f8fafc !important; }
     </style>
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="#">
-                <i class="bi bi-car-front-fill me-2"></i>
-                Car Data Collector
-            </a>
-            <div class="navbar-text text-light">
-                <span id="lastUpdate">Last update: --</span>
-                <i class="bi bi-arrow-clockwise refresh-btn ms-2" onclick="refreshAll()" title="Refresh"></i>
-            </div>
+<nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom shadow-sm">
+    <div class="container-fluid">
+        <a class="navbar-brand fw-semibold" href="#">
+            <i class="bi bi-car-front-fill me-2"></i>Car Data Collector
+        </a>
+        <div class="d-flex align-items-center gap-3">
+            <span class="system-pill" id="pgPill">Postgres ?</span>
+            <span class="system-pill" id="redisPill">Redis ?</span>
+            <span class="system-pill" id="ollamaPill">Ollama ?</span>
+            <span class="text-muted small" id="lastUpdate">—</span>
+            <button class="btn btn-sm btn-outline-secondary" onclick="refreshAll()" title="Refresh">
+                <i class="bi bi-arrow-clockwise"></i>
+            </button>
         </div>
-    </nav>
+    </div>
+</nav>
 
-    <div class="container-fluid py-4">
-        <!-- Stats Cards -->
-        <div class="row g-4 mb-4">
-            <div class="col-md-3">
-                <div class="card stat-card h-100 border-primary">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <h6 class="text-muted mb-1">Total Documents</h6>
-                                <h3 class="mb-0" id="totalDocs">--</h3>
-                            </div>
-                            <i class="bi bi-file-text fs-1 text-primary opacity-50"></i>
-                        </div>
-                        <small class="text-muted">Unique: <span id="uniqueDocs">--</span></small>
+<div class="container-fluid py-4">
+    <!-- Stat cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card stat-card h-100">
+                <div class="card-body d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="stat-label">Documents</div>
+                        <div class="stat-value" id="totalDocs">—</div>
+                        <small class="text-muted">Unique: <span id="uniqueDocs">—</span> · Dup: <span id="duplicateDocs">—</span></small>
                     </div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="card stat-card h-100 border-success">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <h6 class="text-muted mb-1">Q&A Pairs</h6>
-                                <h3 class="mb-0" id="totalQA">--</h3>
-                            </div>
-                            <i class="bi bi-chat-dots fs-1 text-success opacity-50"></i>
-                        </div>
-                        <small class="text-muted">For fine-tuning</small>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="card stat-card h-100 border-info">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <h6 class="text-muted mb-1">Active Sources</h6>
-                                <h3 class="mb-0" id="activeSources">--</h3>
-                            </div>
-                            <i class="bi bi-globe fs-1 text-info opacity-50"></i>
-                        </div>
-                        <small class="text-muted">of <span id="totalSources">13</span> configured</small>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-3">
-                <div class="card stat-card h-100 border-warning">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div>
-                                <h6 class="text-muted mb-1">Disk Usage</h6>
-                                <h3 class="mb-0" id="diskUsage">--%</h3>
-                            </div>
-                            <i class="bi bi-hdd fs-1 text-warning opacity-50"></i>
-                        </div>
-                        <small class="text-muted">Free: <span id="diskFree">--</span> GB</small>
-                    </div>
+                    <i class="bi bi-file-text stat-icon text-primary"></i>
                 </div>
             </div>
         </div>
+        <div class="col-md-3">
+            <div class="card stat-card h-100">
+                <div class="card-body d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="stat-label">Q/A pairs</div>
+                        <div class="stat-value" id="totalQA">—</div>
+                        <small class="text-muted">Pending docs: <span id="pendingQA">—</span></small>
+                    </div>
+                    <i class="bi bi-chat-dots stat-icon text-success"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card stat-card h-100">
+                <div class="card-body d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="stat-label">Sources</div>
+                        <div class="stat-value"><span id="activeSources">—</span> / <span id="totalSources">—</span></div>
+                        <small class="text-muted">Active in DB / configured</small>
+                    </div>
+                    <i class="bi bi-globe stat-icon text-info"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card stat-card h-100">
+                <div class="card-body d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="stat-label">Disk</div>
+                        <div class="stat-value"><span id="diskUsage">—</span>%</div>
+                        <small class="text-muted">Free: <span id="diskFree">—</span> GB · Round <span id="lastRound">—</span></small>
+                    </div>
+                    <i class="bi bi-hdd stat-icon text-warning"></i>
+                </div>
+            </div>
+        </div>
+    </div>
 
-        <!-- Charts Row -->
-        <div class="row g-4 mb-4">
+    <!-- Tabs -->
+    <ul class="nav nav-tabs mb-3" id="mainTabs">
+        <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-overview">Overview</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-sources">Sources</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-data">Documents</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-qa">Q&amp;A Pairs</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-rounds">Rounds</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-system">System</button></li>
+    </ul>
+
+    <div class="tab-content">
+
+      <!-- ===== Overview ===== -->
+      <div class="tab-pane fade show active" id="tab-overview">
+        <div class="row g-3">
             <div class="col-md-8">
-                <div class="card h-100">
-                    <div class="card-header">
-                        <i class="bi bi-graph-up me-2"></i>Scraping Trends (Last 7 Days)
-                    </div>
-                    <div class="card-body">
-                        <canvas id="trendsChart" height="200"></canvas>
-                    </div>
-                </div>
+                <div class="card h-100"><div class="card-header"><i class="bi bi-graph-up me-2"></i>Activity (last 14 days)</div>
+                    <div class="card-body"><canvas id="trendsChart" height="120"></canvas></div></div>
             </div>
             <div class="col-md-4">
-                <div class="card h-100">
-                    <div class="card-header">
-                        <i class="bi bi-pie-chart me-2"></i>Source Distribution
-                    </div>
-                    <div class="card-body">
-                        <canvas id="distributionChart" height="200"></canvas>
-                    </div>
-                </div>
+                <div class="card h-100"><div class="card-header"><i class="bi bi-pie-chart me-2"></i>Source distribution</div>
+                    <div class="card-body"><canvas id="distributionChart" height="160"></canvas></div></div>
             </div>
         </div>
+      </div>
 
-        <!-- Sources and Data Row -->
-        <div class="row g-4">
-            <div class="col-md-5">
-                <div class="card h-100">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <span><i class="bi bi-list-check me-2"></i>Sources Status</span>
-                        <span class="badge bg-secondary" id="sourceCount">0</span>
-                    </div>
-                    <div class="card-body table-container p-0">
-                        <table class="table table-hover table-sm mb-0">
-                            <thead class="table-light sticky-top">
-                                <tr>
-                                    <th>Source</th>
-                                    <th>Type</th>
-                                    <th>Status</th>
-                                    <th>Items</th>
-                                    <th>Last Scrape</th>
-                                </tr>
-                            </thead>
-                            <tbody id="sourcesTable">
-                                <tr>
-                                    <td colspan="5" class="text-center text-muted">Loading...</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+      <!-- ===== Sources ===== -->
+      <div class="tab-pane fade" id="tab-sources">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-list-check me-2"></i>Sources</span>
+                <span class="badge badge-soft" id="sourceCount">0</span>
+            </div>
+            <div class="card-body p-0 table-container">
+                <table class="table table-hover table-sm mb-0">
+                    <thead class="table-light sticky-top">
+                        <tr>
+                            <th>Source</th><th>Type</th><th>Status</th>
+                            <th class="text-end">Total</th>
+                            <th class="text-end">Unique</th>
+                            <th class="text-end">Q/A</th>
+                            <th>Last scrape</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sourcesTable">
+                        <tr><td colspan="7" class="text-center text-muted">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+      </div>
+
+      <!-- ===== Documents ===== -->
+      <div class="tab-pane fade" id="tab-data">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span><i class="bi bi-database me-2"></i>Documents</span>
+                <div class="d-flex gap-2 flex-wrap">
+                    <select class="form-select form-select-sm" id="docSourceFilter" style="width: 180px;">
+                        <option value="">All sources</option>
+                    </select>
+                    <select class="form-select form-select-sm" id="docHasQA" style="width: 130px;">
+                        <option value="">Q/A any</option>
+                        <option value="1">With Q/A</option>
+                        <option value="0">Without Q/A</option>
+                    </select>
+                    <input type="text" class="form-control form-control-sm" id="docSearch"
+                           placeholder="Search title / URL / text…" style="width: 240px;">
+                    <button class="btn btn-sm btn-primary" onclick="fetchData(1)"><i class="bi bi-search"></i></button>
                 </div>
             </div>
-            <div class="col-md-7">
-                <div class="card h-100">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <span><i class="bi bi-database me-2"></i>Recent Data</span>
-                        <div class="d-flex gap-2">
-                            <select class="form-select form-select-sm" id="sourceFilter" style="width: auto;">
-                                <option value="">All Sources</option>
-                            </select>
-                            <input type="text" class="form-control form-control-sm" id="searchInput" 
-                                   placeholder="Search..." style="width: 150px;">
-                        </div>
+            <div class="card-body p-0 table-container">
+                <table class="table table-hover table-sm mb-0">
+                    <thead class="table-light sticky-top">
+                        <tr>
+                            <th>Title</th><th>Source</th><th>Stage</th>
+                            <th class="text-end">Words</th>
+                            <th class="text-end">Q/A</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dataTable">
+                        <tr><td colspan="6" class="text-center text-muted">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer d-flex justify-content-between align-items-center">
+                <small class="text-muted">Showing <span id="docShowing">0</span> of <span id="docTotal">0</span></small>
+                <nav><ul class="pagination pagination-sm mb-0" id="docPagination"></ul></nav>
+            </div>
+        </div>
+      </div>
+
+      <!-- ===== Q/A ===== -->
+      <div class="tab-pane fade" id="tab-qa">
+        <div class="row g-3 mb-3">
+            <div class="col-md-3">
+                <div class="card stat-card"><div class="card-body py-3">
+                    <div class="stat-label">Total Q/A</div>
+                    <div class="stat-value" id="qaTotal">—</div>
+                </div></div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card"><div class="card-body py-3">
+                    <div class="stat-label">Avg Q length</div>
+                    <div class="stat-value" id="qaAvgQ">—</div>
+                </div></div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card"><div class="card-body py-3">
+                    <div class="stat-label">Avg A length</div>
+                    <div class="stat-value" id="qaAvgA">—</div>
+                </div></div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stat-card"><div class="card-body py-3">
+                    <div class="stat-label">Avg quality</div>
+                    <div class="stat-value" id="qaAvgQuality">—</div>
+                </div></div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span><i class="bi bi-chat-dots me-2"></i>Q/A pairs</span>
+                <div class="d-flex gap-2 flex-wrap align-items-center">
+                    <select class="form-select form-select-sm" id="qaSourceFilter" style="width: 180px;">
+                        <option value="">All sources</option>
+                    </select>
+                    <input type="text" class="form-control form-control-sm" id="qaSearch"
+                           placeholder="Search Q or A…" style="width: 240px;">
+                    <button class="btn btn-sm btn-primary" onclick="fetchQA(1)"><i class="bi bi-search"></i></button>
+                    <div class="vr"></div>
+                    <input type="number" min="1" max="50" value="5" id="qaBatchSize"
+                           class="form-control form-control-sm" style="width: 80px;" title="Batch size">
+                    <button class="btn btn-sm btn-success" id="qaTriggerBtn" onclick="triggerQAGeneration()">
+                        <i class="bi bi-play-fill"></i> Generate
+                    </button>
+                </div>
+            </div>
+            <div class="card-body" id="qaList" style="max-height: 600px; overflow-y: auto;">
+                <div class="text-center text-muted">Loading…</div>
+            </div>
+            <div class="card-footer d-flex justify-content-between align-items-center">
+                <small class="text-muted">Showing <span id="qaShowing">0</span> of <span id="qaTotalCount">0</span></small>
+                <nav><ul class="pagination pagination-sm mb-0" id="qaPagination"></ul></nav>
+            </div>
+        </div>
+        <div id="qaJobBanner" class="alert alert-info mt-3 d-none"></div>
+      </div>
+
+      <!-- ===== Rounds ===== -->
+      <div class="tab-pane fade" id="tab-rounds">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-arrow-repeat me-2"></i>Recent rounds</div>
+            <div class="card-body p-0 table-container">
+                <table class="table table-sm mb-0">
+                    <thead class="table-light sticky-top">
+                        <tr>
+                            <th>#</th><th>Status</th><th>Started</th><th>Ended</th>
+                            <th class="text-end">Scraped</th>
+                            <th class="text-end">Stored</th>
+                            <th class="text-end">Duplicates</th>
+                            <th class="text-end">Q/A</th>
+                            <th class="text-end">Errors</th>
+                        </tr>
+                    </thead>
+                    <tbody id="roundsTable">
+                        <tr><td colspan="9" class="text-center text-muted">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+      </div>
+
+      <!-- ===== System ===== -->
+      <div class="tab-pane fade" id="tab-system">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <div class="card h-100"><div class="card-header">PostgreSQL</div>
+                    <div class="card-body" id="sysPg">Loading…</div></div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100"><div class="card-header">Redis</div>
+                    <div class="card-body" id="sysRedis">Loading…</div></div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100"><div class="card-header">Ollama</div>
+                    <div class="card-body" id="sysOllama">Loading…</div></div>
+            </div>
+        </div>
+        <div class="card mt-3">
+            <div class="card-header"><i class="bi bi-info-circle me-2"></i>Dashboard info</div>
+            <div class="card-body">
+                <p class="mb-1 small text-muted">The dashboard reads from PostgreSQL and Redis. Q/A generation uses Ollama via the configured URL.</p>
+                <p class="mb-0 small text-muted">Manual generation is available on the Q/A tab. Continuous pipeline is started with <code>python -m src.main run</code>.</p>
+            </div>
+        </div>
+      </div>
+
+    </div>
+</div>
+
+<!-- ============ Document detail modal ============ -->
+<div class="modal fade" id="docModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="docModalTitle">Document</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-2 mb-3 small">
+                    <div class="col-md-3"><strong>Source:</strong> <span id="docSource">—</span></div>
+                    <div class="col-md-3"><strong>Category:</strong> <span id="docCategory">—</span></div>
+                    <div class="col-md-3"><strong>Author:</strong> <span id="docAuthor">—</span></div>
+                    <div class="col-md-3"><strong>Stage:</strong> <span id="docStage">—</span></div>
+                    <div class="col-md-3"><strong>Words:</strong> <span id="docWords">—</span></div>
+                    <div class="col-md-3"><strong>Q/A count:</strong> <span id="docQACount">—</span></div>
+                    <div class="col-md-3"><strong>Round:</strong> <span id="docRound">—</span></div>
+                    <div class="col-md-3"><strong>Date:</strong> <span id="docDate">—</span></div>
+                </div>
+                <div class="mb-3"><strong>URL:</strong> <a href="#" id="docUrl" target="_blank" class="text-break">—</a></div>
+                <ul class="nav nav-pills mb-2" id="docInnerTabs">
+                    <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#doc-content">Content</button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#doc-qa">Q/A <span class="badge bg-secondary" id="docQABadge">0</span></button></li>
+                </ul>
+                <div class="tab-content">
+                    <div class="tab-pane fade show active" id="doc-content">
+                        <pre class="content-preview" id="docContent">—</pre>
                     </div>
-                    <div class="card-body table-container p-0">
-                        <table class="table table-hover table-sm mb-0">
-                            <thead class="table-light sticky-top">
-                                <tr>
-                                    <th>Title</th>
-                                    <th>Source</th>
-                                    <th>Category</th>
-                                    <th>Quality</th>
-                                    <th>Date</th>
-                                </tr>
-                            </thead>
-                            <tbody id="dataTable">
-                                <tr>
-                                    <td colspan="5" class="text-center text-muted">Loading...</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="card-footer d-flex justify-content-between align-items-center">
-                        <small class="text-muted">Showing <span id="showingCount">0</span> of <span id="totalItems">0</span></small>
-                        <nav>
-                            <ul class="pagination pagination-sm mb-0" id="pagination">
-                            </ul>
-                        </nav>
+                    <div class="tab-pane fade" id="doc-qa">
+                        <div id="docQAList" class="mt-2"></div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
+</div>
 
-    <!-- Data Modal -->
-    <div class="modal fade" id="dataModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="modalTitle">Document Details</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <strong>Source:</strong> <span id="modalSource">--</span>
-                        </div>
-                        <div class="col-md-6">
-                            <strong>Category:</strong> <span id="modalCategory">--</span>
-                        </div>
-                    </div>
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <strong>Quality Score:</strong> <span id="modalQuality">--</span>
-                        </div>
-                        <div class="col-md-6">
-                            <strong>Word Count:</strong> <span id="modalWords">--</span>
-                        </div>
-                    </div>
-                    <div class="mb-3">
-                        <strong>URL:</strong> 
-                        <a href="#" id="modalUrl" target="_blank" class="text-break">--</a>
-                    </div>
-                    <div>
-                        <strong>Content Preview:</strong>
-                        <pre class="content-preview mt-2" id="modalContent">--</pre>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                </div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+const REFRESH_INTERVAL = 30000;
+let trendsChart = null;
+let distributionChart = null;
+let docPage = 1, qaPage = 1;
+let qaPollTimer = null;
+
+document.addEventListener('DOMContentLoaded', () => {
+    refreshAll();
+    setInterval(refreshAll, REFRESH_INTERVAL);
+    document.getElementById('docSearch').addEventListener('keydown', e => { if (e.key === 'Enter') fetchData(1); });
+    document.getElementById('qaSearch').addEventListener('keydown', e => { if (e.key === 'Enter') fetchQA(1); });
+    document.getElementById('docSourceFilter').addEventListener('change', () => fetchData(1));
+    document.getElementById('docHasQA').addEventListener('change', () => fetchData(1));
+    document.getElementById('qaSourceFilter').addEventListener('change', () => fetchQA(1));
+});
+
+async function refreshAll() {
+    try {
+        await Promise.all([
+            fetchStats(), fetchSources(), fetchData(docPage), fetchTrends(),
+            fetchDistribution(), fetchQA(qaPage), fetchQAStats(), fetchRounds(),
+            fetchSystem(),
+        ]);
+        document.getElementById('lastUpdate').textContent =
+            'Updated ' + new Date().toLocaleTimeString();
+    } catch (e) { console.error(e); }
+}
+
+async function fetchStats() {
+    const s = await (await fetch('/api/stats')).json();
+    set('totalDocs', fmt(s.total_documents));
+    set('uniqueDocs', fmt(s.unique_documents));
+    set('duplicateDocs', fmt(s.duplicate_documents));
+    set('totalQA', fmt(s.total_qa_pairs));
+    set('pendingQA', fmt(s.pending_qa_documents));
+    set('activeSources', s.active_sources || 0);
+    set('totalSources', s.total_sources || 0);
+    set('diskUsage', (s.disk_usage_percent || 0).toFixed(1));
+    set('diskFree', (s.disk_free_gb || 0).toFixed(1));
+    set('lastRound', s.last_round || 0);
+}
+
+async function fetchSources() {
+    const sources = await (await fetch('/api/sources')).json();
+    const tbody = document.getElementById('sourcesTable');
+    if (!sources.length) { tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No sources</td></tr>'; return; }
+    tbody.innerHTML = sources.map(s => `
+        <tr>
+            <td><strong>${esc(s.name)}</strong>
+                ${s.in_config ? '' : '<span class="badge badge-soft ms-1">orphan</span>'}</td>
+            <td><span class="badge badge-soft">${esc(s.type || '—')}</span></td>
+            <td><span class="status-dot status-${s.status}"></span>${s.status}</td>
+            <td class="text-end">${fmt(s.total_items)}</td>
+            <td class="text-end text-success">${fmt(s.unique_items)}</td>
+            <td class="text-end">${fmt(s.qa_pairs)}</td>
+            <td><small>${formatDate(s.last_scrape)}</small></td>
+        </tr>`).join('');
+    document.getElementById('sourceCount').textContent = sources.length;
+
+    // Update filter selects
+    const opts = '<option value="">All sources</option>' +
+        sources.map(s => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join('');
+    syncSelect('docSourceFilter', opts);
+    syncSelect('qaSourceFilter', opts);
+}
+
+async function fetchData(page = 1) {
+    docPage = page;
+    const src = document.getElementById('docSourceFilter').value;
+    const hasQA = document.getElementById('docHasQA').value;
+    const search = document.getElementById('docSearch').value;
+    let url = `/api/data?page=${page}&per_page=25`;
+    if (src) url += `&source=${encodeURIComponent(src)}`;
+    if (hasQA) url += `&has_qa=${hasQA}`;
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+
+    const data = await (await fetch(url)).json();
+    const tbody = document.getElementById('dataTable');
+    if (!data.items || !data.items.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No documents</td></tr>';
+        document.getElementById('docShowing').textContent = '0';
+        document.getElementById('docTotal').textContent = '0';
+        document.getElementById('docPagination').innerHTML = '';
+        return;
+    }
+    tbody.innerHTML = data.items.map(it => `
+        <tr class="clickable-row" onclick="showDocModal('${it.id}')">
+            <td class="text-truncate" style="max-width: 360px;" title="${esc(it.title || '')}">
+                ${esc(it.title || '(untitled)')}
+                ${it.is_duplicate ? '<span class="badge bg-warning text-dark ms-1">dup</span>' : ''}
+            </td>
+            <td><small>${esc(it.source_name)}</small></td>
+            <td><span class="badge badge-soft">${esc(it.pipeline_stage)}</span></td>
+            <td class="text-end">${fmt(it.word_count || it.content_length || 0)}</td>
+            <td class="text-end">${it.qa_count > 0 ? `<span class="badge bg-success">${it.qa_count}</span>` : '<span class="text-muted">0</span>'}</td>
+            <td><small>${formatDate(it.date_scraped)}</small></td>
+        </tr>`).join('');
+    document.getElementById('docShowing').textContent = data.items.length;
+    document.getElementById('docTotal').textContent = fmt(data.total);
+    renderPagination('docPagination', data.page, data.total_pages, p => fetchData(p));
+}
+
+async function fetchQA(page = 1) {
+    qaPage = page;
+    const src = document.getElementById('qaSourceFilter').value;
+    const search = document.getElementById('qaSearch').value;
+    let url = `/api/qa?page=${page}&per_page=20`;
+    if (src) url += `&source=${encodeURIComponent(src)}`;
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+    const data = await (await fetch(url)).json();
+    const list = document.getElementById('qaList');
+    if (!data.items || !data.items.length) {
+        list.innerHTML = '<div class="text-center text-muted py-4">No Q/A pairs yet. Run Generate to create some.</div>';
+        document.getElementById('qaShowing').textContent = '0';
+        document.getElementById('qaTotalCount').textContent = '0';
+        document.getElementById('qaPagination').innerHTML = '';
+        return;
+    }
+    list.innerHTML = data.items.map(qa => `
+        <div class="qa-card">
+            <div class="q"><i class="bi bi-question-circle me-1"></i>${esc(qa.question)}</div>
+            <div class="a">${esc(qa.answer)}</div>
+            <div class="meta">
+                <span class="badge badge-soft">${esc(qa.source_name)}</span>
+                ${qa.car_brand ? `<span class="badge badge-soft">${esc(qa.car_brand)} ${esc(qa.car_year || '')}</span>` : ''}
+                ${qa.llm_model ? `<span class="badge badge-soft">${esc(qa.llm_model)}</span>` : ''}
+                <span class="ms-2">${formatDate(qa.date_generated)}</span>
+                ${qa.document_id ? `<a href="#" class="ms-2" onclick="showDocModal('${qa.document_id}'); return false;">view doc →</a>` : ''}
             </div>
-        </div>
-    </div>
+        </div>`).join('');
+    document.getElementById('qaShowing').textContent = data.items.length;
+    document.getElementById('qaTotalCount').textContent = fmt(data.total);
+    renderPagination('qaPagination', data.page, data.total_pages, p => fetchQA(p));
+}
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // Configuration
-        const REFRESH_INTERVAL = 30000; // 30 seconds
-        let trendsChart = null;
-        let distributionChart = null;
-        let currentPage = 1;
+async function fetchQAStats() {
+    const s = await (await fetch('/api/qa/stats')).json();
+    set('qaTotal', fmt(s.total || 0));
+    set('qaAvgQ', s.avg_question_length || 0);
+    set('qaAvgA', s.avg_answer_length || 0);
+    set('qaAvgQuality', (s.avg_quality_score || 0).toFixed(2));
+}
 
-        // Initialize
-        document.addEventListener('DOMContentLoaded', function() {
-            refreshAll();
-            setInterval(refreshAll, REFRESH_INTERVAL);
+async function fetchTrends() {
+    const t = await (await fetch('/api/trends?days=14')).json();
+    const ctx = document.getElementById('trendsChart').getContext('2d');
+    if (trendsChart) trendsChart.destroy();
+    trendsChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: t.labels,
+            datasets: [
+                { label: 'Scraped',  data: t.scraped,      borderColor: '#0d6efd', backgroundColor: 'rgba(13,110,253,.1)', fill: true, tension: .3 },
+                { label: 'Q/A',      data: t.qa_generated, borderColor: '#198754', backgroundColor: 'rgba(25,135,84,.1)',  fill: true, tension: .3 },
+                { label: 'Duplicate',data: t.duplicates,   borderColor: '#dc3545', backgroundColor: 'rgba(220,53,69,.08)', fill: true, tension: .3 },
+            ]
+        },
+        options: { responsive: true, maintainAspectRatio: false,
+                   scales: { y: { beginAtZero: true } } }
+    });
+}
+
+async function fetchDistribution() {
+    const d = await (await fetch('/api/source-distribution')).json();
+    const ctx = document.getElementById('distributionChart').getContext('2d');
+    if (distributionChart) distributionChart.destroy();
+    if (!d.labels || !d.labels.length) return;
+    distributionChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: { labels: d.labels, datasets: [{ data: d.values,
+            backgroundColor: ['#0d6efd','#198754','#ffc107','#dc3545','#6f42c1','#0dcaf0','#fd7e14','#20c997','#6c757d','#d63384','#adb5bd','#495057','#212529'] }] },
+        options: { responsive: true, maintainAspectRatio: false,
+                   plugins: { legend: { position: 'right', labels: { boxWidth: 10, font: {size: 11} } } } }
+    });
+}
+
+async function fetchRounds() {
+    const rounds = await (await fetch('/api/rounds?limit=20')).json();
+    const tbody = document.getElementById('roundsTable');
+    if (!rounds.length) { tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No rounds yet</td></tr>'; return; }
+    tbody.innerHTML = rounds.map(r => `
+        <tr>
+            <td><strong>#${r.round_number}</strong></td>
+            <td><span class="status-dot status-${r.status === 'running' ? 'running' : (r.status === 'completed' ? 'active' : 'error')}"></span>${esc(r.status)}</td>
+            <td><small>${formatDate(r.start_time)}</small></td>
+            <td><small>${formatDate(r.end_time)}</small></td>
+            <td class="text-end">${fmt(r.total_items_scraped || 0)}</td>
+            <td class="text-end">${fmt(r.total_items_stored || 0)}</td>
+            <td class="text-end">${fmt(r.total_duplicates_found || 0)}</td>
+            <td class="text-end">${fmt(r.total_qa_generated || 0)}</td>
+            <td class="text-end ${r.errors_count > 0 ? 'text-danger' : ''}">${fmt(r.errors_count || 0)}</td>
+        </tr>`).join('');
+}
+
+async function fetchSystem() {
+    const s = await (await fetch('/api/system/status')).json();
+    pill('pgPill', s.postgres, 'Postgres');
+    pill('redisPill', s.redis, 'Redis');
+    pill('ollamaPill', s.ollama, 'Ollama');
+
+    const d = s.details || {};
+    document.getElementById('sysPg').innerHTML = s.postgres
+        ? `<div>Status: <strong class="text-success">connected</strong></div>
+           <div>DB size: <code>${esc(d.pg_size || '—')}</code></div>`
+        : `<div class="text-danger">Not connected</div><small>${esc(d.postgres_error || '')}</small>`;
+
+    document.getElementById('sysRedis').innerHTML = s.redis
+        ? `<div>Status: <strong class="text-success">connected</strong></div>
+           <div>Version: <code>${esc(d.redis_version || '—')}</code></div>
+           <div>Memory: <code>${esc(d.redis_memory || '—')}</code></div>
+           <div>Clients: <code>${esc(d.redis_clients || '—')}</code></div>`
+        : `<div class="text-warning">Not connected</div><small>${esc(d.redis_error || '')}</small>`;
+
+    document.getElementById('sysOllama').innerHTML = s.ollama
+        ? `<div>Status: <strong class="text-success">available</strong></div>
+           <div>URL: <code>${esc(d.ollama_url || '')}</code></div>
+           <div class="mt-1"><small>Models:</small><div class="ollama-models">${(d.ollama_models||[]).map(m=>esc(m)).join('<br>') || '<em class="text-muted">none</em>'}</div></div>`
+        : `<div class="text-warning">Not reachable at <code>${esc(d.ollama_url || '')}</code></div><small>${esc(d.ollama_error || '')}</small>`;
+}
+
+async function showDocModal(docId) {
+    const it = await (await fetch(`/api/data/${docId}`)).json();
+    if (it.error) return;
+    document.getElementById('docModalTitle').textContent = it.title || '(untitled)';
+    document.getElementById('docSource').textContent = it.source_name || '—';
+    document.getElementById('docCategory').textContent = it.category || '—';
+    document.getElementById('docAuthor').textContent = it.author || '—';
+    document.getElementById('docStage').textContent = it.pipeline_stage || '—';
+    document.getElementById('docWords').textContent = fmt(it.word_count || 0);
+    document.getElementById('docQACount').textContent = fmt(it.qa_count || 0);
+    document.getElementById('docRound').textContent = it.round_number || '—';
+    document.getElementById('docDate').textContent = formatDate(it.date_scraped);
+    const a = document.getElementById('docUrl');
+    a.textContent = it.page_url || '—'; a.href = it.page_url || '#';
+    document.getElementById('docContent').textContent =
+        (it.content_text || '').slice(0, 8000) + ((it.content_text || '').length > 8000 ? '\n\n…' : '') || '(no content)';
+
+    const qa = it.qa_pairs || [];
+    document.getElementById('docQABadge').textContent = qa.length;
+    document.getElementById('docQAList').innerHTML = qa.length
+        ? qa.map(q => `<div class="qa-card">
+            <div class="q">${esc(q.question)}</div>
+            <div class="a">${esc(q.answer)}</div>
+            <div class="meta">
+                ${q.car_brand ? `<span class="badge badge-soft">${esc(q.car_brand)} ${esc(q.car_year || '')}</span>` : ''}
+                ${q.llm_model ? `<span class="badge badge-soft">${esc(q.llm_model)}</span>` : ''}
+                <span class="ms-2">${formatDate(q.date_generated)}</span>
+            </div></div>`).join('')
+        : '<div class="text-muted text-center py-3">No Q/A pairs for this document yet.</div>';
+    new bootstrap.Modal(document.getElementById('docModal')).show();
+}
+
+async function triggerQAGeneration() {
+    const batchSize = parseInt(document.getElementById('qaBatchSize').value, 10) || 5;
+    const btn = document.getElementById('qaTriggerBtn');
+    btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Starting…';
+    const banner = document.getElementById('qaJobBanner');
+    try {
+        const res = await fetch('/api/qa/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ batch_size: batchSize }),
         });
-
-        // Refresh all data
-        async function refreshAll() {
-            await Promise.all([
-                fetchStats(),
-                fetchSources(),
-                fetchData(),
-                fetchTrends(),
-                fetchDistribution()
-            ]);
-            document.getElementById('lastUpdate').textContent = 
-                'Last update: ' + new Date().toLocaleTimeString();
+        const data = await res.json();
+        if (!data.ok) {
+            banner.className = 'alert alert-warning mt-3';
+            banner.textContent = data.error || 'Failed to start';
+            banner.classList.remove('d-none');
+        } else {
+            banner.className = 'alert alert-info mt-3';
+            banner.innerHTML = `<i class="bi bi-arrow-repeat"></i> Q/A job running (batch ${batchSize})…`;
+            banner.classList.remove('d-none');
+            startQAJobPolling();
         }
+    } catch (e) {
+        banner.className = 'alert alert-danger mt-3';
+        banner.textContent = 'Error: ' + e.message;
+        banner.classList.remove('d-none');
+    } finally {
+        setTimeout(() => { btn.disabled = false; btn.innerHTML = '<i class="bi bi-play-fill"></i> Generate'; }, 1500);
+    }
+}
 
-        // Fetch statistics
-        async function fetchStats() {
-            try {
-                const response = await fetch('/api/stats');
-                const stats = await response.json();
-                
-                document.getElementById('totalDocs').textContent = formatNumber(stats.total_documents);
-                document.getElementById('uniqueDocs').textContent = formatNumber(stats.unique_documents);
-                document.getElementById('totalQA').textContent = formatNumber(stats.total_qa_pairs);
-                document.getElementById('activeSources').textContent = stats.active_sources || 0;
-                document.getElementById('totalSources').textContent = stats.total_sources || 13;
-                document.getElementById('diskUsage').textContent = (stats.disk_usage_percent || 0).toFixed(1) + '%';
-                document.getElementById('diskFree').textContent = (stats.disk_free_gb || 0).toFixed(1);
-            } catch (error) {
-                console.error('Error fetching stats:', error);
+function startQAJobPolling() {
+    if (qaPollTimer) clearInterval(qaPollTimer);
+    qaPollTimer = setInterval(async () => {
+        const s = await (await fetch('/api/qa/generate/status')).json();
+        const banner = document.getElementById('qaJobBanner');
+        if (!s.running) {
+            clearInterval(qaPollTimer); qaPollTimer = null;
+            const r = s.last_result;
+            if (r && r.ok) {
+                banner.className = 'alert alert-success mt-3';
+                banner.innerHTML = `<i class="bi bi-check-circle"></i> Q/A job finished — generated ${r.stats?.qa_generated || 0} pairs from ${r.stats?.processed || 0} document(s).`;
+            } else if (r) {
+                banner.className = 'alert alert-danger mt-3';
+                banner.textContent = 'Q/A job failed: ' + (r.error || 'unknown');
             }
+            await Promise.all([fetchQA(1), fetchQAStats(), fetchStats()]);
         }
+    }, 3000);
+}
 
-        // Fetch sources
-        async function fetchSources() {
-            try {
-                const response = await fetch('/api/sources');
-                const sources = await response.json();
-                
-                const tbody = document.getElementById('sourcesTable');
-                const filter = document.getElementById('sourceFilter');
-                
-                if (sources.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No sources configured</td></tr>';
-                    return;
-                }
-
-                tbody.innerHTML = sources.map(source => `
-                    <tr>
-                        <td><strong>${source.name}</strong></td>
-                        <td><span class="badge bg-secondary">${source.type}</span></td>
-                        <td>
-                            <span class="status-dot status-${source.status}"></span>
-                            ${source.status}
-                        </td>
-                        <td>${formatNumber(source.total_items)}</td>
-                        <td>${source.last_scrape ? formatDate(source.last_scrape) : '--'}</td>
-                    </tr>
-                `).join('');
-                
-                document.getElementById('sourceCount').textContent = sources.length;
-                
-                // Update filter dropdown
-                const currentValue = filter.value;
-                filter.innerHTML = '<option value="">All Sources</option>' + 
-                    sources.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
-                filter.value = currentValue;
-            } catch (error) {
-                console.error('Error fetching sources:', error);
-            }
-        }
-
-        // Fetch data
-        async function fetchData(page = 1) {
-            try {
-                currentPage = page;
-                const source = document.getElementById('sourceFilter').value;
-                const search = document.getElementById('searchInput').value;
-                
-                let url = `/api/data?page=${page}&per_page=20`;
-                if (source) url += `&source=${encodeURIComponent(source)}`;
-                if (search) url += `&search=${encodeURIComponent(search)}`;
-                
-                const response = await fetch(url);
-                const data = await response.json();
-                
-                const tbody = document.getElementById('dataTable');
-                
-                if (!data.items || data.items.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No data found</td></tr>';
-                    document.getElementById('showingCount').textContent = '0';
-                    document.getElementById('totalItems').textContent = '0';
-                    return;
-                }
-
-                tbody.innerHTML = data.items.map(item => `
-                    <tr onclick="showDataModal('${item.id}')" style="cursor: pointer;">
-                        <td class="text-truncate" style="max-width: 200px;" title="${escapeHtml(item.title)}">
-                            ${escapeHtml(item.title)}
-                        </td>
-                        <td><small>${item.source_name}</small></td>
-                        <td><span class="badge bg-info">${item.category}</span></td>
-                        <td>${item.quality_score ? item.quality_score.toFixed(0) : '--'}</td>
-                        <td><small>${formatDate(item.date_scraped)}</small></td>
-                    </tr>
-                `).join('');
-                
-                document.getElementById('showingCount').textContent = data.items.length;
-                document.getElementById('totalItems').textContent = formatNumber(data.total);
-                
-                // Update pagination
-                updatePagination(data.page, data.total_pages);
-            } catch (error) {
-                console.error('Error fetching data:', error);
-            }
-        }
-
-        // Fetch trends
-        async function fetchTrends() {
-            try {
-                const response = await fetch('/api/trends?days=7');
-                const trends = await response.json();
-                
-                const ctx = document.getElementById('trendsChart').getContext('2d');
-                
-                if (trendsChart) {
-                    trendsChart.destroy();
-                }
-                
-                trendsChart = new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: trends.labels,
-                        datasets: [
-                            {
-                                label: 'Scraped',
-                                data: trends.scraped,
-                                borderColor: '#0d6efd',
-                                backgroundColor: 'rgba(13, 110, 253, 0.1)',
-                                fill: true,
-                                tension: 0.3
-                            },
-                            {
-                                label: 'Q&A Generated',
-                                data: trends.qa_generated,
-                                borderColor: '#198754',
-                                backgroundColor: 'rgba(25, 135, 84, 0.1)',
-                                fill: true,
-                                tension: 0.3
-                            },
-                            {
-                                label: 'Duplicates',
-                                data: trends.duplicates,
-                                borderColor: '#dc3545',
-                                backgroundColor: 'rgba(220, 53, 69, 0.1)',
-                                fill: true,
-                                tension: 0.3
-                            }
-                        ]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: {
-                                position: 'top'
-                            }
-                        },
-                        scales: {
-                            y: {
-                                beginAtZero: true
-                            }
-                        }
-                    }
-                });
-            } catch (error) {
-                console.error('Error fetching trends:', error);
-            }
-        }
-
-        // Fetch distribution
-        async function fetchDistribution() {
-            try {
-                const response = await fetch('/api/source-distribution');
-                const dist = await response.json();
-                
-                const ctx = document.getElementById('distributionChart').getContext('2d');
-                
-                if (distributionChart) {
-                    distributionChart.destroy();
-                }
-                
-                if (!dist.labels || dist.labels.length === 0) {
-                    return;
-                }
-                
-                distributionChart = new Chart(ctx, {
-                    type: 'doughnut',
-                    data: {
-                        labels: dist.labels,
-                        datasets: [{
-                            data: dist.values,
-                            backgroundColor: [
-                                '#0d6efd', '#198754', '#ffc107', '#dc3545', 
-                                '#6f42c1', '#0dcaf0', '#fd7e14', '#20c997',
-                                '#6c757d', '#d63384', '#adb5bd', '#495057', '#212529'
-                            ]
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: {
-                                position: 'right',
-                                labels: {
-                                    boxWidth: 12
-                                }
-                            }
-                        }
-                    }
-                });
-            } catch (error) {
-                console.error('Error fetching distribution:', error);
-            }
-        }
-
-        // Show data modal
-        async function showDataModal(id) {
-            try {
-                const response = await fetch(`/api/data/${id}`);
-                const item = await response.json();
-                
-                if (item.error) {
-                    return;
-                }
-                
-                document.getElementById('modalTitle').textContent = item.title || 'Untitled';
-                document.getElementById('modalSource').textContent = item.source_name;
-                document.getElementById('modalCategory').textContent = item.category;
-                document.getElementById('modalQuality').textContent = item.quality_score ? item.quality_score.toFixed(1) : '--';
-                document.getElementById('modalWords').textContent = formatNumber(item.word_count || 0);
-                document.getElementById('modalUrl').textContent = item.page_url;
-                document.getElementById('modalUrl').href = item.page_url;
-                document.getElementById('modalContent').textContent = item.content_text ? 
-                    item.content_text.substring(0, 2000) + (item.content_text.length > 2000 ? '...' : '') : '--';
-                
-                const modal = new bootstrap.Modal(document.getElementById('dataModal'));
-                modal.show();
-            } catch (error) {
-                console.error('Error fetching item:', error);
-            }
-        }
-
-        // Update pagination
-        function updatePagination(current, total) {
-            const pagination = document.getElementById('pagination');
-            
-            if (total <= 1) {
-                pagination.innerHTML = '';
-                return;
-            }
-            
-            let html = '';
-            
-            // Previous
-            html += `<li class="page-item ${current === 1 ? 'disabled' : ''}">
-                <a class="page-link" href="#" onclick="fetchData(${current - 1})">&laquo;</a>
-            </li>`;
-            
-            // Pages
-            for (let i = Math.max(1, current - 2); i <= Math.min(total, current + 2); i++) {
-                html += `<li class="page-item ${i === current ? 'active' : ''}">
-                    <a class="page-link" href="#" onclick="fetchData(${i})">${i}</a>
-                </li>`;
-            }
-            
-            // Next
-            html += `<li class="page-item ${current === total ? 'disabled' : ''}">
-                <a class="page-link" href="#" onclick="fetchData(${current + 1})">&raquo;</a>
-            </li>`;
-            
-            pagination.innerHTML = html;
-        }
-
-        // Utility functions
-        function formatNumber(num) {
-            if (num === undefined || num === null) return '--';
-            return num.toLocaleString();
-        }
-
-        function formatDate(dateStr) {
-            if (!dateStr) return '--';
-            const date = new Date(dateStr);
-            return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-        }
-
-        function escapeHtml(text) {
-            if (!text) return '';
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
-        // Event listeners
-        document.getElementById('sourceFilter').addEventListener('change', () => fetchData(1));
-        document.getElementById('searchInput').addEventListener('keyup', function(e) {
-            if (e.key === 'Enter') {
-                fetchData(1);
-            }
+// ----- helpers -----
+function set(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
+function fmt(n) { return (n === undefined || n === null) ? '—' : Number(n).toLocaleString(); }
+function esc(s) { if (s === undefined || s === null) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function formatDate(s) {
+    if (!s) return '—';
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return s;
+    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+}
+function pill(id, ok, label) {
+    const el = document.getElementById(id);
+    el.textContent = label + ' ' + (ok ? '✓' : '✗');
+    el.className = 'system-pill ' + (ok ? 'ok' : 'bad');
+}
+function syncSelect(id, opts) {
+    const sel = document.getElementById(id); if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = opts;
+    if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+}
+function renderPagination(elId, page, totalPages, onClick) {
+    const el = document.getElementById(elId);
+    if (!totalPages || totalPages <= 1) { el.innerHTML = ''; return; }
+    let html = `<li class="page-item ${page === 1 ? 'disabled' : ''}"><a class="page-link" href="#">«</a></li>`;
+    for (let i = Math.max(1, page - 2); i <= Math.min(totalPages, page + 2); i++) {
+        html += `<li class="page-item ${i === page ? 'active' : ''}"><a class="page-link" href="#">${i}</a></li>`;
+    }
+    html += `<li class="page-item ${page === totalPages ? 'disabled' : ''}"><a class="page-link" href="#">»</a></li>`;
+    el.innerHTML = html;
+    [...el.querySelectorAll('a.page-link')].forEach((a, idx) => {
+        a.addEventListener('click', e => {
+            e.preventDefault();
+            if (idx === 0) onClick(Math.max(1, page - 1));
+            else if (idx === el.querySelectorAll('a.page-link').length - 1) onClick(Math.min(totalPages, page + 1));
+            else onClick(parseInt(a.textContent, 10));
         });
-    </script>
+    });
+}
+</script>
 </body>
 </html>

@@ -1,7 +1,5 @@
-"""
-Dashboard module
-"""
+"""Dashboard module"""
 
-from src.dashboard.app import app, run_dashboard, init_app
+from src.dashboard.app import app, configure, run_dashboard
 
-__all__ = ["app", "run_dashboard", "init_app"]
+__all__ = ["app", "configure", "run_dashboard"]

@@ -47,20 +47,27 @@ storage:
   disk_warning_threshold_percent: 90
 
 # -----------------------------------------------------------------------------
-# Database Settings (PostgreSQL)
+# Database Settings (PostgreSQL via asyncpg)
 # -----------------------------------------------------------------------------
 database:
-  # Connection settings from environment variable DATABASE_URL
+  # DATABASE_URL env var takes precedence; otherwise these fields are used.
+  host: "localhost"
+  port: 5432
+  name: "car_collector"
+  user: "collector"
+  password: "collector_pass"
+  pool_min_size: 2
   pool_size: 10
-  max_overflow: 20
   pool_timeout: 30
-  pool_recycle: 1800  # Recycle connections every 30 minutes
 
 # -----------------------------------------------------------------------------
 # Redis Cache Settings
 # -----------------------------------------------------------------------------
 redis:
-  # Connection from environment variable REDIS_URL
+  # REDIS_URL env var takes precedence; otherwise these fields are used.
+  host: "localhost"
+  port: 6379
+  db: 0
   duplicate_cache_ttl: 86400  # 24 hours
   url_cache_ttl: 3600  # 1 hour
   max_connections: 20

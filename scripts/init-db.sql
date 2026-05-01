@@ -1,184 +1,212 @@
 -- =============================================================================
 -- CAR DATA COLLECTOR BOT - PostgreSQL Database Schema
 -- =============================================================================
+-- Stand-alone (un-partitioned) schema. Add native partitioning or pg_partman
+-- later when data volume warrants it; the current schema indexes are enough
+-- for tens of millions of rows.
 
--- Enable required extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pg_trgm";  -- For text similarity
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
 -- =============================================================================
--- Sources Table - Track all configured data sources
+-- Sources - Configured data sources (mirrored from settings.yaml at startup)
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS sources (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name VARCHAR(100) UNIQUE NOT NULL,
-    source_type VARCHAR(50) NOT NULL,  -- forum, technical, qa
+    source_type VARCHAR(50) NOT NULL,
     base_url VARCHAR(500) NOT NULL,
     enabled BOOLEAN DEFAULT true,
     priority INTEGER DEFAULT 5,
-    rate_limit_seconds DECIMAL(5,2) DEFAULT 5.0,
+    rate_limit_seconds NUMERIC(5,2) DEFAULT 5.0,
     scrape_interval_hours INTEGER DEFAULT 12,
-    last_scrape_at TIMESTAMP WITH TIME ZONE,
-    next_scrape_at TIMESTAMP WITH TIME ZONE,
+    last_scrape_at TIMESTAMPTZ,
+    next_scrape_at TIMESTAMPTZ,
     total_items_scraped INTEGER DEFAULT 0,
     total_errors INTEGER DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =============================================================================
--- Scraped Data Table - Main content storage (partitioned by month)
+-- Scraped Data - Main content metadata. Body text is stored on disk; this
+-- table holds metadata + a content excerpt used for indexing/search.
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS scraped_data (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    source_id UUID REFERENCES sources(id) ON DELETE CASCADE,
+    source_id UUID REFERENCES sources(id) ON DELETE SET NULL,
     source_name VARCHAR(100) NOT NULL,
+    source_url VARCHAR(2000) DEFAULT '',
     page_url VARCHAR(2000) NOT NULL,
-    url_hash VARCHAR(64) NOT NULL,  -- SHA256 of normalized URL
-    content_hash VARCHAR(64) NOT NULL,  -- SHA256 of content
-    simhash BIGINT,  -- For near-duplicate detection
-    title VARCHAR(1000),
-    content_text TEXT NOT NULL,
+    url_hash VARCHAR(64) UNIQUE NOT NULL,
+    content_hash VARCHAR(64) NOT NULL,
+    simhash VARCHAR(64) DEFAULT '',
+    title VARCHAR(1000) DEFAULT '',
+    content_text TEXT DEFAULT '',
     content_html TEXT,
-    author VARCHAR(200),
-    category VARCHAR(50),  -- forum_thread, article, qa, technical
-    quality_score DECIMAL(5,2),  -- 0-100
+    author VARCHAR(200) DEFAULT '',
+    category VARCHAR(50) DEFAULT 'article',
+    quality_score NUMERIC(5,2),
     language VARCHAR(10) DEFAULT 'en',
-    word_count INTEGER,
-    date_published TIMESTAMP WITH TIME ZONE,
-    date_scraped TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    word_count INTEGER DEFAULT 0,
+    content_length INTEGER DEFAULT 0,
+    file_size_bytes BIGINT DEFAULT 0,
+    file_path_html VARCHAR(2000) DEFAULT '',
+    file_path_pdf VARCHAR(2000) DEFAULT '',
+    pipeline_stage VARCHAR(30) DEFAULT 'scraped',
     is_duplicate BOOLEAN DEFAULT false,
-    duplicate_of UUID REFERENCES scraped_data(id),
-    metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-) PARTITION BY RANGE (created_at);
-
--- Create partitions for the next 12 months
-DO $$
-DECLARE
-    start_date DATE;
-    end_date DATE;
-    partition_name TEXT;
-BEGIN
-    FOR i IN 0..12 LOOP
-        start_date := DATE_TRUNC('month', CURRENT_DATE + (i || ' months')::INTERVAL);
-        end_date := start_date + INTERVAL '1 month';
-        partition_name := 'scraped_data_' || TO_CHAR(start_date, 'YYYY_MM');
-        
-        EXECUTE format(
-            'CREATE TABLE IF NOT EXISTS %I PARTITION OF scraped_data
-             FOR VALUES FROM (%L) TO (%L)',
-            partition_name, start_date, end_date
-        );
-    END LOOP;
-END $$;
-
--- =============================================================================
--- Scrape Logs Table - Track each scraping session
--- =============================================================================
-CREATE TABLE IF NOT EXISTS scrape_logs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    source_id UUID REFERENCES sources(id) ON DELETE CASCADE,
-    source_name VARCHAR(100) NOT NULL,
-    round_number INTEGER NOT NULL,
-    started_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    finished_at TIMESTAMP WITH TIME ZONE,
-    status VARCHAR(20) DEFAULT 'running',  -- running, completed, failed, cancelled
-    pages_scraped INTEGER DEFAULT 0,
-    items_scraped INTEGER DEFAULT 0,
-    items_stored INTEGER DEFAULT 0,
-    duplicates_found INTEGER DEFAULT 0,
-    errors_count INTEGER DEFAULT 0,
-    error_messages JSONB DEFAULT '[]',
-    duration_seconds DECIMAL(10,2),
-    metadata JSONB DEFAULT '{}'
+    duplicate_of UUID REFERENCES scraped_data(id) ON DELETE SET NULL,
+    qa_count INTEGER DEFAULT 0,
+    round_number INTEGER DEFAULT 0,
+    tags TEXT DEFAULT '',
+    metadata JSONB DEFAULT '{}'::jsonb,
+    date_published TIMESTAMPTZ,
+    date_scraped TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    date_processed TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =============================================================================
--- Quality Scores Table - LLM-based quality assessment
--- =============================================================================
-CREATE TABLE IF NOT EXISTS quality_scores (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    scraped_data_id UUID REFERENCES scraped_data(id) ON DELETE CASCADE,
-    overall_score DECIMAL(5,2),
-    relevance_score DECIMAL(5,2),  -- How relevant to automotive
-    technical_score DECIMAL(5,2),  -- Technical accuracy
-    completeness_score DECIMAL(5,2),  -- Information completeness
-    readability_score DECIMAL(5,2),
-    is_spam BOOLEAN DEFAULT false,
-    is_low_quality BOOLEAN DEFAULT false,
-    llm_model VARCHAR(100),
-    evaluated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    raw_response JSONB
-);
-
--- =============================================================================
--- QA Pairs Table - Generated Q&A for fine-tuning
+-- Q/A Pairs
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS qa_pairs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    scraped_data_id UUID REFERENCES scraped_data(id) ON DELETE CASCADE,
+    document_id UUID REFERENCES scraped_data(id) ON DELETE CASCADE,
+    source_name VARCHAR(100) NOT NULL,
     question TEXT NOT NULL,
     answer TEXT NOT NULL,
-    category VARCHAR(50),  -- repair, maintenance, specs, troubleshooting
-    quality_score DECIMAL(5,2),
-    llm_model VARCHAR(100),
-    generated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    qa_hash VARCHAR(64) UNIQUE NOT NULL,
+    category VARCHAR(50) DEFAULT '',
+    car_brand VARCHAR(80) DEFAULT '',
+    car_model VARCHAR(80) DEFAULT '',
+    car_year VARCHAR(8) DEFAULT '',
+    quality_score NUMERIC(5,3) DEFAULT 0,
+    llm_model VARCHAR(100) DEFAULT '',
     is_verified BOOLEAN DEFAULT false,
-    metadata JSONB DEFAULT '{}'
+    metadata JSONB DEFAULT '{}'::jsonb,
+    date_generated TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =============================================================================
--- URL Visited Table - Track visited URLs to avoid re-scraping
+-- Visited URLs - Skip-list / change detection
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS urls_visited (
     url_hash VARCHAR(64) PRIMARY KEY,
     url VARCHAR(2000) NOT NULL,
     source_name VARCHAR(100) NOT NULL,
-    first_visited_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    last_visited_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    first_visited_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    last_visited_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     visit_count INTEGER DEFAULT 1,
-    last_status VARCHAR(20),  -- success, error, blocked
-    content_changed BOOLEAN DEFAULT false
+    last_content_hash VARCHAR(64) DEFAULT '',
+    has_changed BOOLEAN DEFAULT false,
+    last_status VARCHAR(20) DEFAULT 'success'
 );
 
 -- =============================================================================
--- Indexes for Performance
+-- Scrape Logs - Per (round, source) execution log
 -- =============================================================================
-
--- scraped_data indexes
-CREATE INDEX IF NOT EXISTS idx_scraped_data_source_id ON scraped_data(source_id);
-CREATE INDEX IF NOT EXISTS idx_scraped_data_source_name ON scraped_data(source_name);
-CREATE INDEX IF NOT EXISTS idx_scraped_data_url_hash ON scraped_data(url_hash);
-CREATE INDEX IF NOT EXISTS idx_scraped_data_content_hash ON scraped_data(content_hash);
-CREATE INDEX IF NOT EXISTS idx_scraped_data_simhash ON scraped_data(simhash);
-CREATE INDEX IF NOT EXISTS idx_scraped_data_quality ON scraped_data(quality_score) WHERE quality_score IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_scraped_data_created ON scraped_data(created_at);
-CREATE INDEX IF NOT EXISTS idx_scraped_data_not_duplicate ON scraped_data(id) WHERE is_duplicate = false;
-
--- Full-text search index
-CREATE INDEX IF NOT EXISTS idx_scraped_data_title_fts ON scraped_data USING gin(to_tsvector('english', title));
-CREATE INDEX IF NOT EXISTS idx_scraped_data_content_fts ON scraped_data USING gin(to_tsvector('english', content_text));
-
--- scrape_logs indexes
-CREATE INDEX IF NOT EXISTS idx_scrape_logs_source ON scrape_logs(source_id);
-CREATE INDEX IF NOT EXISTS idx_scrape_logs_status ON scrape_logs(status);
-CREATE INDEX IF NOT EXISTS idx_scrape_logs_started ON scrape_logs(started_at);
-
--- qa_pairs indexes
-CREATE INDEX IF NOT EXISTS idx_qa_pairs_scraped_data ON qa_pairs(scraped_data_id);
-CREATE INDEX IF NOT EXISTS idx_qa_pairs_category ON qa_pairs(category);
-CREATE INDEX IF NOT EXISTS idx_qa_pairs_quality ON qa_pairs(quality_score);
-
--- urls_visited indexes
-CREATE INDEX IF NOT EXISTS idx_urls_visited_source ON urls_visited(source_name);
-CREATE INDEX IF NOT EXISTS idx_urls_visited_last ON urls_visited(last_visited_at);
+CREATE TABLE IF NOT EXISTS scrape_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    source_id UUID REFERENCES sources(id) ON DELETE SET NULL,
+    source_name VARCHAR(100) NOT NULL,
+    round_number INTEGER NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at TIMESTAMPTZ,
+    status VARCHAR(20) DEFAULT 'running',
+    pages_scraped INTEGER DEFAULT 0,
+    items_scraped INTEGER DEFAULT 0,
+    items_stored INTEGER DEFAULT 0,
+    duplicates_found INTEGER DEFAULT 0,
+    errors_count INTEGER DEFAULT 0,
+    error_messages JSONB DEFAULT '[]'::jsonb,
+    duration_seconds NUMERIC(10,2),
+    metadata JSONB DEFAULT '{}'::jsonb
+);
 
 -- =============================================================================
--- Functions
+-- Round Summaries - One row per pipeline round
 -- =============================================================================
+CREATE TABLE IF NOT EXISTS rounds (
+    round_number INTEGER PRIMARY KEY,
+    start_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    end_time TIMESTAMPTZ,
+    total_urls_visited INTEGER DEFAULT 0,
+    total_items_scraped INTEGER DEFAULT 0,
+    total_items_stored INTEGER DEFAULT 0,
+    total_duplicates_found INTEGER DEFAULT 0,
+    total_qa_generated INTEGER DEFAULT 0,
+    errors_count INTEGER DEFAULT 0,
+    sources_completed JSONB DEFAULT '[]'::jsonb,
+    status VARCHAR(20) DEFAULT 'running'
+);
 
--- Auto-update updated_at timestamp
+-- =============================================================================
+-- SimHash Index - bucketed for cheap candidate lookup
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS simhash_index (
+    document_id UUID PRIMARY KEY REFERENCES scraped_data(id) ON DELETE CASCADE,
+    simhash_value VARCHAR(64) NOT NULL,
+    bucket_0 VARCHAR(16) DEFAULT '',
+    bucket_1 VARCHAR(16) DEFAULT '',
+    bucket_2 VARCHAR(16) DEFAULT '',
+    bucket_3 VARCHAR(16) DEFAULT ''
+);
+
+-- =============================================================================
+-- Quality Scores
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS quality_scores (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    scraped_data_id UUID REFERENCES scraped_data(id) ON DELETE CASCADE,
+    overall_score NUMERIC(5,2),
+    relevance_score NUMERIC(5,2),
+    technical_score NUMERIC(5,2),
+    completeness_score NUMERIC(5,2),
+    readability_score NUMERIC(5,2),
+    is_spam BOOLEAN DEFAULT false,
+    is_low_quality BOOLEAN DEFAULT false,
+    llm_model VARCHAR(100),
+    evaluated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    raw_response JSONB
+);
+
+-- =============================================================================
+-- Indexes
+-- =============================================================================
+CREATE INDEX IF NOT EXISTS idx_scraped_source         ON scraped_data(source_name);
+CREATE INDEX IF NOT EXISTS idx_scraped_url_hash       ON scraped_data(url_hash);
+CREATE INDEX IF NOT EXISTS idx_scraped_content_hash   ON scraped_data(content_hash);
+CREATE INDEX IF NOT EXISTS idx_scraped_simhash        ON scraped_data(simhash);
+CREATE INDEX IF NOT EXISTS idx_scraped_stage          ON scraped_data(pipeline_stage);
+CREATE INDEX IF NOT EXISTS idx_scraped_dup            ON scraped_data(is_duplicate);
+CREATE INDEX IF NOT EXISTS idx_scraped_round          ON scraped_data(round_number);
+CREATE INDEX IF NOT EXISTS idx_scraped_date_scraped   ON scraped_data(date_scraped DESC);
+CREATE INDEX IF NOT EXISTS idx_scraped_qa_count       ON scraped_data(qa_count);
+CREATE INDEX IF NOT EXISTS idx_scraped_title_trgm     ON scraped_data USING gin(title gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_scraped_qa_pending     ON scraped_data(date_scraped DESC)
+    WHERE is_duplicate = false AND qa_count = 0;
+
+CREATE INDEX IF NOT EXISTS idx_qa_doc                 ON qa_pairs(document_id);
+CREATE INDEX IF NOT EXISTS idx_qa_source              ON qa_pairs(source_name);
+CREATE INDEX IF NOT EXISTS idx_qa_brand               ON qa_pairs(car_brand);
+CREATE INDEX IF NOT EXISTS idx_qa_date                ON qa_pairs(date_generated DESC);
+
+CREATE INDEX IF NOT EXISTS idx_visited_source         ON urls_visited(source_name);
+CREATE INDEX IF NOT EXISTS idx_visited_changed        ON urls_visited(has_changed) WHERE has_changed = true;
+
+CREATE INDEX IF NOT EXISTS idx_scrape_logs_round      ON scrape_logs(round_number);
+CREATE INDEX IF NOT EXISTS idx_scrape_logs_source     ON scrape_logs(source_id);
+CREATE INDEX IF NOT EXISTS idx_scrape_logs_started    ON scrape_logs(started_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_simhash_b0             ON simhash_index(bucket_0);
+CREATE INDEX IF NOT EXISTS idx_simhash_b1             ON simhash_index(bucket_1);
+CREATE INDEX IF NOT EXISTS idx_simhash_b2             ON simhash_index(bucket_2);
+CREATE INDEX IF NOT EXISTS idx_simhash_b3             ON simhash_index(bucket_3);
+
+-- =============================================================================
+-- Functions and triggers
+-- =============================================================================
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -187,55 +215,33 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
+DROP TRIGGER IF EXISTS update_sources_updated_at ON sources;
 CREATE TRIGGER update_sources_updated_at
     BEFORE UPDATE ON sources
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
--- Function to create new monthly partitions
-CREATE OR REPLACE FUNCTION create_monthly_partition()
-RETURNS void AS $$
-DECLARE
-    next_month DATE;
-    partition_name TEXT;
-BEGIN
-    next_month := DATE_TRUNC('month', CURRENT_DATE + INTERVAL '1 month');
-    partition_name := 'scraped_data_' || TO_CHAR(next_month, 'YYYY_MM');
-    
-    EXECUTE format(
-        'CREATE TABLE IF NOT EXISTS %I PARTITION OF scraped_data
-         FOR VALUES FROM (%L) TO (%L)',
-        partition_name,
-        next_month,
-        next_month + INTERVAL '1 month'
-    );
-END;
-$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS update_scraped_updated_at ON scraped_data;
+CREATE TRIGGER update_scraped_updated_at
+    BEFORE UPDATE ON scraped_data
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
 
 -- =============================================================================
--- Initial Source Data (English Automotive Sources)
+-- Initial source seeding (idempotent; pipeline also upserts at startup)
 -- =============================================================================
 INSERT INTO sources (name, source_type, base_url, enabled, priority, rate_limit_seconds, scrape_interval_hours) VALUES
-    -- Forums
-    ('reddit_mechanicadvice', 'forum', 'https://www.reddit.com/r/MechanicAdvice', true, 1, 2.0, 6),
-    ('reddit_cartalk', 'forum', 'https://www.reddit.com/r/Cartalk', true, 1, 2.0, 6),
-    ('bobistheoilguy', 'forum', 'https://bobistheoilguy.com', true, 2, 5.0, 12),
-    ('automotiveforums', 'forum', 'https://www.automotiveforums.com', true, 3, 5.0, 12),
-    ('cargurus_forum', 'forum', 'https://www.cargurus.com/Cars/Discussion', true, 2, 5.0, 12),
-    
-    -- Technical Sites
-    ('repairpal', 'technical', 'https://repairpal.com', true, 1, 5.0, 24),
-    ('carcarekiosk', 'technical', 'https://www.carcarekiosk.com', true, 2, 5.0, 24),
-    ('autozone_guides', 'technical', 'https://www.autozone.com/diy', true, 2, 5.0, 24),
-    
-    -- Complaint/Issue Sites
-    ('carcomplaints', 'technical', 'https://www.carcomplaints.com', true, 1, 3.0, 48),
-    ('nhtsa', 'technical', 'https://www.nhtsa.gov/recalls-complaints', true, 1, 3.0, 48),
-    
-    -- Specs & Reviews
-    ('motortrend', 'technical', 'https://www.motortrend.com', true, 3, 5.0, 48),
-    ('caranddriver', 'technical', 'https://www.caranddriver.com', true, 3, 5.0, 48),
-    
-    -- Q&A Sites
-    ('2carpros', 'qa', 'https://www.2carpros.com', true, 1, 5.0, 12)
+    ('reddit_mechanicadvice', 'forum',     'https://www.reddit.com/r/MechanicAdvice', true, 1, 2.0, 6),
+    ('reddit_cartalk',         'forum',     'https://www.reddit.com/r/Cartalk',        true, 1, 2.0, 6),
+    ('bobistheoilguy',         'forum',     'https://bobistheoilguy.com',              true, 2, 5.0, 12),
+    ('automotiveforums',       'forum',     'https://www.automotiveforums.com',        true, 3, 5.0, 12),
+    ('cargurus_forum',         'forum',     'https://www.cargurus.com',                true, 2, 5.0, 12),
+    ('repairpal',              'technical', 'https://repairpal.com',                   true, 1, 5.0, 24),
+    ('carcarekiosk',           'technical', 'https://www.carcarekiosk.com',            true, 2, 5.0, 24),
+    ('autozone_guides',        'technical', 'https://www.autozone.com',                true, 2, 5.0, 24),
+    ('carcomplaints',          'technical', 'https://www.carcomplaints.com',           true, 1, 3.0, 48),
+    ('nhtsa',                  'technical', 'https://api.nhtsa.gov',                   true, 1, 1.0, 168),
+    ('motortrend',             'content',   'https://www.motortrend.com',              true, 3, 5.0, 48),
+    ('caranddriver',           'content',   'https://www.caranddriver.com',            true, 3, 5.0, 48),
+    ('2carpros',               'qa',        'https://www.2carpros.com',                true, 1, 5.0, 12)
 ON CONFLICT (name) DO NOTHING;

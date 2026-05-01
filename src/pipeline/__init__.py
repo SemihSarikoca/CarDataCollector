@@ -12,6 +12,7 @@ import time
 from datetime import datetime
 from typing import Optional
 
+from src.cache import RedisManager
 from src.database import DatabaseManager
 from src.dedup import DeduplicationEngine
 from src.models import PipelineStage, RoundStats, SourceConfig, SourceType
@@ -60,12 +61,10 @@ class PipelineOrchestrator:
         self._start_time: Optional[float] = None
         self._current_round = 0
 
-        # Bileşenleri oluştur
-        storage_config = config.get("storage", {})
-        db_path = f"{storage_config.get('base_path', '/data/car-collector')}/{storage_config.get('database_path', 'db/collector.db')}"
-
-        self.db = DatabaseManager(db_path)
-        self.dedup = DeduplicationEngine(self.db, config)
+        # Bileşenleri oluştur (Postgres + Redis)
+        self.db = DatabaseManager(config)
+        self.cache = RedisManager(config)
+        self.dedup = DeduplicationEngine(self.db, config, cache=self.cache)
         self.storage = StorageManager(config, self.db, self.dedup)
         self.qa_generator = QAGenerator(config, self.db, self.storage)
 
@@ -87,9 +86,30 @@ class PipelineOrchestrator:
     async def initialize(self):
         """Tüm bileşenleri başlat"""
         await self.db.initialize()
+        await self.cache.initialize()
         await self.storage.initialize()
+        await self._sync_sources_to_db()
         self._current_round = await self.db.get_last_round_number()
-        logger.info("orchestrator_initialized", last_round=self._current_round)
+        logger.info("orchestrator_initialized",
+                   last_round=self._current_round,
+                   redis=self.cache.connected)
+
+    async def _sync_sources_to_db(self):
+        """Settings.yaml'deki kaynakları sources tablosuna upsert et."""
+        for src in self.config.get("sources", []):
+            try:
+                await self.db.upsert_source(
+                    name=src.get("name"),
+                    source_type=src.get("type", "content"),
+                    base_url=src.get("base_url", ""),
+                    enabled=bool(src.get("enabled", True)),
+                    priority=int(src.get("priority", 5)),
+                    rate_limit=float(src.get("rate_limit", 5.0)),
+                    scrape_interval_hours=int(src.get("scrape_interval_hours", 12)),
+                )
+            except Exception as e:
+                logger.warning("source_sync_failed",
+                               name=src.get("name"), error=str(e))
 
     def _create_scraper(self, source_config: SourceConfig) -> BaseScraper:
         """Kaynak konfigürasyonuna göre uygun scraper oluştur"""
@@ -307,6 +327,7 @@ class PipelineOrchestrator:
     async def _cleanup(self):
         """Temizlik"""
         await self.qa_generator.close()
+        await self.cache.close()
         await self.db.close()
         logger.info("pipeline_stopped",
                    total_rounds=self._current_round,

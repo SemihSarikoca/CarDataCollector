@@ -88,6 +88,12 @@ class StorageManager:
             logger.error("disk_full_skipping_item", url=item.page_url)
             return None
 
+        # Hash'leri garanti altına al
+        if not item.content_hash:
+            item.content_hash = item.compute_content_hash()
+        if not item.url_hash:
+            item.url_hash = item.compute_url_hash()
+
         # Duplikasyon kontrolü
         is_dup, dup_of, method = await self.dedup.check_duplicate(
             item.content_text, item.content_hash, item.url_hash
@@ -135,7 +141,10 @@ class StorageManager:
         async with aiofiles.open(html_path, "w", encoding="utf-8") as f:
             await f.write(html_content)
 
-        # Veritabanına kaydet
+        # DB'ye yaz - StoredDocument'i kullanmıyoruz çünkü Postgres'in tüm
+        # alanları doğrudan kabul etmesi daha basit. Gerekli kısa-yol:
+        word_count = len(item.content_text.split()) if item.content_text else 0
+
         doc = StoredDocument(
             source_name=item.source_name,
             source_url=item.source_url,
@@ -146,7 +155,9 @@ class StorageManager:
             file_path_html=str(html_path),
             file_size_bytes=len(content_bytes),
             content_length=len(item.content_text),
+            word_count=word_count,
             category=item.category,
+            language=item.language or "en",
             author=item.author,
             date_published=item.date_published,
             date_scraped=item.date_scraped,
@@ -159,17 +170,30 @@ class StorageManager:
         doc_id = await self.db.insert_document(doc)
 
         if doc_id:
+            # Ayrıca content_text'i DB'ye yaz (arama/önizleme için)
+            await self.db.fetchval("""
+                UPDATE scraped_data SET content_text = $1, content_html = $2
+                WHERE id = $3
+            """, item.content_text or "", item.content_html or None, doc_id)
+
             # SimHash hesapla ve indeksle
             simhash_hex = await self.dedup.compute_and_store_simhash(
                 doc_id, item.content_text
             )
-            # Aşamayı güncelle
+            if simhash_hex:
+                await self.db.fetchval(
+                    "UPDATE scraped_data SET simhash = $1 WHERE id = $2",
+                    simhash_hex, doc_id,
+                )
             await self.db.update_document_stage(doc_id, PipelineStage.DEDUPLICATED)
 
-            # URL'yi ziyaret edilmiş olarak işaretle
+            # URL'yi ziyaret edilmiş olarak işaretle (DB + Redis)
             await self.db.mark_url_visited(
                 item.url_hash, item.page_url, item.source_name, item.content_hash
             )
+            if self.dedup.cache:
+                await self.dedup.cache.mark_url_visited(item.url_hash, item.content_hash)
+                await self.dedup.cache.set_content_hash_doc(item.content_hash, doc_id)
 
             doc.id = doc_id
             doc.simhash = simhash_hex

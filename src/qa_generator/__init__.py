@@ -48,17 +48,17 @@ class QAGenerator:
         self._total_failed = 0
 
     def _default_system_prompt(self) -> str:
-        return """Sen bir otomobil teknik uzmanısın. Verilen Türkçe otomobil teknik metni veya
-forum tartışmasından, LLM fine-tuning için kullanılacak yüksek kaliteli
-soru-cevap çiftleri oluştur.
+        return """You are an automotive technical expert. From the given English
+automotive technical text or forum discussion, generate high-quality
+question-answer pairs for LLM fine-tuning.
 
-Kurallar:
-1. Sorular Türkçe ve doğal dilde olmalı
-2. Cevaplar teknik olarak doğru ve detaylı olmalı
-3. Her Q/A çifti bağımsız olarak anlaşılabilir olmalı
-4. Marka, model, yıl bilgisi varsa dahil et
-5. Genel bilgi yerine spesifik teknik detaylara odaklan
-6. JSON formatında döndür: [{"question": "...", "answer": "..."}]"""
+Rules:
+1. Questions must be in natural English
+2. Answers must be technically accurate and detailed
+3. Each Q/A pair must be independently understandable
+4. Include make, model, year if mentioned
+5. Focus on specific technical details, not general information
+6. Return as JSON array: [{"question": "...", "answer": "..."}]"""
 
     async def check_ollama_health(self) -> bool:
         """Ollama API sağlık kontrolü"""
@@ -100,31 +100,31 @@ Kurallar:
         if len(text) > max_chars:
             text = text[:max_chars] + "\n...[metin kesildi]"
 
-        # Araç bilgisi çıkar
+        # Extract car info
         car_info = extract_car_info(text)
         car_context = ""
         if car_info["brand"]:
-            car_context = f"\nBu metin {car_info['brand']}"
+            car_context = f"\nThis text is about {car_info['brand']}"
             if car_info["year"]:
                 car_context += f" {car_info['year']}"
-            car_context += " ile ilgili."
+            car_context += "."
 
-        user_prompt = f"""Aşağıdaki Türkçe otomobil teknik metninden/forum tartışmasından 
-soru-cevap çiftleri oluştur.{car_context}
+        user_prompt = f"""Generate question-answer pairs from the automotive
+technical text / forum discussion below.{car_context}
 
-Kaynak: {source_name}
-Başlık: {title}
+Source: {source_name}
+Title: {title}
 
----METIN BAŞLANGIÇ---
+---TEXT START---
 {text}
----METİN BİTİŞ---
+---TEXT END---
 
-Yukarıdaki metinden {self.min_qa_per_doc} ile {self.max_qa_per_doc} arası
-yüksek kaliteli Q/A çifti oluştur. Her çift bağımsız olarak anlaşılabilir olmalı.
-Cevaplar detaylı ve teknik olmalı. JSON array formatında döndür:
+Generate between {self.min_qa_per_doc} and {self.max_qa_per_doc} high-quality
+Q/A pairs. Each pair must be independently understandable. Answers must be
+detailed and technical. Return strictly as a JSON array:
 [{{"question": "...", "answer": "..."}}]
 
-Sadece JSON döndür, başka bir şey yazma."""
+Return JSON only, no other text."""
 
         try:
             response = await self._client.post(
@@ -208,9 +208,9 @@ Sadece JSON döndür, başka bir şey yazma."""
 
         for doc in documents:
             try:
-                # Dosyadan metin oku
-                text = ""
-                if doc.get("file_path_html"):
+                # Önce DB'den content_text'i kullan, yoksa dosyadan oku
+                text = doc.get("content_text") or ""
+                if (not text or len(text) < 100) and doc.get("file_path_html"):
                     text = await self.storage.get_document_text(doc["file_path_html"])
 
                 if not text or len(text) < 100:

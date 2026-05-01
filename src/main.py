@@ -279,6 +279,48 @@ def generate_qa(ctx, batch_size):
     asyncio.run(_generate())
 
 
+@cli.command("dashboard")
+@click.option("--host", default=None, help="Bind host (default from settings)")
+@click.option("--port", default=None, type=int, help="Bind port (default from settings)")
+@click.option("--debug", is_flag=True, help="Run Flask in debug mode")
+@click.pass_context
+def dashboard(ctx, host, port, debug):
+    """Web dashboard'u başlat (PostgreSQL + Redis tabanlı)"""
+    config = get_config(ctx.obj["config_path"])
+    setup_logging(config.get("general", {}).get("log_level", "INFO"))
+
+    dash_cfg = config.get("dashboard", {})
+    host = host or dash_cfg.get("host", "0.0.0.0")
+    port = int(port or dash_cfg.get("port", 5000))
+    debug = debug or bool(dash_cfg.get("debug", False))
+
+    from src.dashboard.app import run_dashboard
+
+    console.print(Panel.fit(
+        f"[bold green]🚗 Dashboard[/bold green]\n"
+        f"URL: [cyan]http://{host}:{port}[/cyan]\n"
+        f"DB: PostgreSQL · Cache: Redis",
+        title="Web Dashboard"
+    ))
+    run_dashboard(config=config, host=host, port=port, debug=debug)
+
+
+@cli.command("migrate-from-sqlite")
+@click.option("--sqlite", default="data/db/collector.db",
+              help="Eski SQLite dosyasının yolu")
+@click.option("--dry-run", is_flag=True, help="Sadece sayım, yazma yapma")
+@click.pass_context
+def migrate_from_sqlite(ctx, sqlite, dry_run):
+    """Eski SQLite verisini PostgreSQL'e taşı"""
+    setup_logging("INFO")
+    import subprocess
+    cmd = [sys.executable, "scripts/migrate_sqlite_to_postgres.py",
+           "--sqlite", sqlite]
+    if dry_run:
+        cmd.append("--dry-run")
+    subprocess.run(cmd, check=False)
+
+
 @cli.command("list-sources")
 @click.pass_context
 def list_sources(ctx):

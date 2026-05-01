@@ -10,6 +10,7 @@ from typing import Optional
 
 from datasketch import MinHash, MinHashLSH
 
+from src.cache import RedisManager
 from src.database import DatabaseManager
 from src.utils.logger import get_logger
 
@@ -145,8 +146,10 @@ class DeduplicationEngine:
     3. MinHash doğrulama (opsiyonel, yüksek doğruluk gereken durumlar)
     """
 
-    def __init__(self, db: DatabaseManager, config: dict):
+    def __init__(self, db: DatabaseManager, config: dict,
+                 cache: Optional[RedisManager] = None):
         self.db = db
+        self.cache = cache
         self.config = config
         dedup_config = config.get("deduplication", {})
         self.similarity_threshold = dedup_config.get("similarity_threshold", 0.85)
@@ -157,23 +160,39 @@ class DeduplicationEngine:
         )
         self.ngram_size = dedup_config.get("ngram_size", 3)
         self.batch_size = dedup_config.get("batch_size", 1000)
+        self.use_redis = dedup_config.get("use_redis_cache", True)
 
     async def check_duplicate(self, content_text: str, content_hash: str,
-                               url_hash: str) -> tuple[bool, Optional[int], str]:
+                               url_hash: str) -> tuple[bool, Optional[str], str]:
         """
         Duplikasyon kontrolü yap.
-        
+
         Returns:
             (is_duplicate, duplicate_of_id, method)
         """
-        # Katman 1: Tam hash eşleşmesi
+        # Layer 0: Redis fast-path
+        if self.cache and self.use_redis:
+            cached = await self.cache.get_content_hash_doc(content_hash)
+            if cached:
+                logger.debug("dup_cache_hit", method="redis_content", doc=cached)
+                return True, cached, "redis_content_hash"
+            url_hit = await self.cache.is_url_visited(url_hash)
+            if url_hit:
+                # Redis says URL was visited; confirm against DB to recover doc id
+                existing_url = await self.db.get_document_by_url_hash(url_hash)
+                if existing_url:
+                    return True, existing_url["id"], "redis_url_hash"
+
+        # Layer 1: Exact content match (DB)
         existing = await self.db.get_document_by_content_hash(content_hash)
         if existing:
             logger.info("exact_duplicate_found", method="content_hash",
                        duplicate_of=existing["id"])
+            if self.cache and self.use_redis:
+                await self.cache.set_content_hash_doc(content_hash, existing["id"])
             return True, existing["id"], "exact_hash"
 
-        # URL zaten işlenmiş mi?
+        # Layer 1b: URL-hash match (DB)
         existing_url = await self.db.get_document_by_url_hash(url_hash)
         if existing_url:
             logger.debug("url_already_exists", url_hash=url_hash)
@@ -200,7 +219,7 @@ class DeduplicationEngine:
 
         return False, None, "unique"
 
-    async def compute_and_store_simhash(self, document_id: int, content_text: str):
+    async def compute_and_store_simhash(self, document_id: str, content_text: str):
         """SimHash hesapla ve veritabanına kaydet"""
         if not content_text or len(content_text) < 50:
             return
@@ -227,25 +246,33 @@ class DeduplicationEngine:
 
             for doc in docs:
                 stats["checked"] += 1
-                # SimHash kontrolü
-                if doc.get("simhash"):
-                    simhash_val = self.simhasher.from_hex(doc["simhash"])
-                    buckets = self.simhasher.get_buckets(simhash_val)
-                    candidates = await self.db.find_similar_simhashes(buckets)
+                if not doc.get("simhash"):
+                    continue
+                simhash_val = self.simhasher.from_hex(doc["simhash"])
+                buckets = self.simhasher.get_buckets(simhash_val)
+                candidates = await self.db.find_similar_simhashes(buckets)
 
-                    for candidate in candidates:
-                        if candidate["document_id"] == doc["id"]:
-                            continue
-                        cand_hash = self.simhasher.from_hex(candidate["simhash_value"])
-                        similarity = self.simhasher.similarity(simhash_val, cand_hash)
-                        if similarity >= self.similarity_threshold:
-                            # Düşük ID'li olan orijinal olarak kabul edilir
-                            if doc["id"] > candidate["document_id"]:
-                                await self.db.mark_duplicate(
-                                    doc["id"], candidate["document_id"]
-                                )
-                                stats["duplicates_found"] += 1
-                                break
+                for candidate in candidates:
+                    if candidate["document_id"] == doc["id"]:
+                        continue
+                    cand_hash = self.simhasher.from_hex(candidate["simhash_value"])
+                    similarity = self.simhasher.similarity(simhash_val, cand_hash)
+                    if similarity < self.similarity_threshold:
+                        continue
+                    # Older record (smaller created_at) wins. Look it up.
+                    cand_row = await self.db.fetchrow(
+                        "SELECT created_at FROM scraped_data WHERE id = $1",
+                        candidate["document_id"],
+                    )
+                    if not cand_row:
+                        continue
+                    if doc.get("created_at") and cand_row["created_at"] \
+                       and doc["created_at"] > cand_row["created_at"]:
+                        await self.db.mark_duplicate(
+                            doc["id"], candidate["document_id"]
+                        )
+                        stats["duplicates_found"] += 1
+                        break
 
             offset += self.batch_size
 

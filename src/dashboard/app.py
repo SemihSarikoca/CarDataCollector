@@ -75,8 +75,9 @@ def configure(config: dict):
         redis_url = f"redis://{r.get('host', 'localhost')}:{r.get('port', 6379)}/{r.get('db', 0)}"
     _state["redis_url"] = redis_url
 
-    _state["ollama_url"] = config.get("qa_generator", {}).get(
-        "ollama_url", "http://localhost:11434"
+    _state["ollama_url"] = (
+        os.environ.get("OLLAMA_URL")
+        or config.get("qa_generator", {}).get("ollama_url", "http://localhost:11434")
     )
     _state["base_path"] = config.get("storage", {}).get("base_path", "./data")
 
@@ -138,7 +139,7 @@ def _query(sql: str, params=None, one: bool = False):
             rows = cur.fetchall()
             for r in rows:
                 for k, v in list(r.items()):
-                    if hasattr(v, "hex") and not isinstance(v, (bytes, bytearray)):
+                    if hasattr(v, "hex") and not isinstance(v, (bytes, bytearray, float)):
                         try:
                             r[k] = str(v)
                         except Exception:

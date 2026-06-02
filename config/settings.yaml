@@ -146,7 +146,7 @@ quality:
 # -----------------------------------------------------------------------------
 qa_generator:
   model: "gemma3-4b"
-  ollama_url: "http://ollama:11434"
+  ollama_url: "http://localhost:11434"
   ollama_model_name: "gemma3:4b"
   fallback_model_name: "gemma3:12b"
   batch_size: 20
@@ -155,8 +155,8 @@ qa_generator:
   temperature: 0.3
   max_tokens: 2048
   max_context_chars: 8000
-  request_timeout_seconds: 120  # per-request; gemma3:4b on M2 responds in 20-90s
-  concurrency: 2  # concurrent Ollama requests; eliminates idle time between calls
+  request_timeout_seconds: 300  # per-request; gemma3:4b on M2 8GB needs up to 5 min
+  concurrency: 1  # M2 8GB: single-request avoids memory pressure / slowdown
   system_prompt: |
     You are an automotive technical expert. From the given English automotive
     technical text or forum discussion, generate high-quality question-answer

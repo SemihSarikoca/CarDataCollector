@@ -5,6 +5,7 @@ Toplanan dökümanları okur, LLM'e gönderir, yapılandırılmış Q/A çiftler
 
 import asyncio
 import json
+import os
 import re
 from datetime import datetime
 from typing import Optional
@@ -32,7 +33,10 @@ class QAGenerator:
         self.storage = storage
 
         qa_config = config.get("qa_generator", {})
-        self.ollama_url = qa_config.get("ollama_url", "http://localhost:11434")
+        self.ollama_url = (
+            os.environ.get("OLLAMA_URL")
+            or qa_config.get("ollama_url", "http://localhost:11434")
+        )
         self.model_name = qa_config.get("ollama_model_name", "gemma2:12b")
         self.fallback_model = qa_config.get("fallback_model_name", "qwen2.5:14b")
         self.batch_size = qa_config.get("batch_size", 5)

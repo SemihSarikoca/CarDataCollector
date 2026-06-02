@@ -21,15 +21,13 @@ services:
       - DATABASE_URL=postgresql://collector:collector_pass@postgres:5432/car_collector
       # Redis
       - REDIS_URL=redis://redis:6379/0
-      # Ollama
-      - OLLAMA_URL=http://ollama:11434
+      # Ollama (running natively on host for Metal GPU access)
+      - OLLAMA_URL=http://host.docker.internal:11434
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-      ollama:
-        condition: service_started
     networks:
       - collector-net
     deploy:
@@ -59,6 +57,7 @@ services:
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql://collector:collector_pass@postgres:5432/car_collector
       - REDIS_URL=redis://redis:6379/0
+      - OLLAMA_URL=http://host.docker.internal:11434
     depends_on:
       postgres:
         condition: service_healthy
@@ -127,34 +126,13 @@ services:
           memory: 512M
           cpus: "0.5"
 
-  # ===========================================
-  # Ollama - LLM Server (Q/A Generation)
-  # ===========================================
-  ollama:
-    image: ollama/ollama:latest
-    container_name: car-collector-ollama
-    restart: unless-stopped
-    volumes:
-      - ollama-models:/root/.ollama
-    ports:
-      - "11434:11434"
-    networks:
-      - collector-net
-    deploy:
-      resources:
-        limits:
-          memory: 6G
-          cpus: "4.0"
-        reservations:
-          memory: 4G
-          cpus: "1.0"
+  # Ollama runs natively on the host (Metal GPU on Apple Silicon).
+  # Start it with: ollama serve
 
 volumes:
   postgres-data:
     driver: local
   redis-data:
-    driver: local
-  ollama-models:
     driver: local
 
 networks:

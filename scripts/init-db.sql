@@ -204,6 +204,12 @@ CREATE INDEX IF NOT EXISTS idx_simhash_b1             ON simhash_index(bucket_1)
 CREATE INDEX IF NOT EXISTS idx_simhash_b2             ON simhash_index(bucket_2);
 CREATE INDEX IF NOT EXISTS idx_simhash_b3             ON simhash_index(bucket_3);
 
+-- Compound indexes for common multi-column query patterns
+CREATE INDEX IF NOT EXISTS idx_scraped_source_date    ON scraped_data(source_name, date_scraped DESC);
+CREATE INDEX IF NOT EXISTS idx_scraped_source_unique  ON scraped_data(source_name) WHERE is_duplicate = false;
+CREATE INDEX IF NOT EXISTS idx_scraped_dup_qa         ON scraped_data(is_duplicate, qa_count);
+CREATE INDEX IF NOT EXISTS idx_scrape_logs_round_src  ON scrape_logs(round_number, source_name);
+
 -- =============================================================================
 -- Functions and triggers
 -- =============================================================================

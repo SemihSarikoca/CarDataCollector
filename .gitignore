@@ -41,3 +41,9 @@ temp/
 # Environment
 .env
 .env.local
+
+# MCP config (contains DB credentials)
+.mcp.json
+
+# Claude Code local config
+.claude/

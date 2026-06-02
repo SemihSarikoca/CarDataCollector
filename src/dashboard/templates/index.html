@@ -1,710 +1,2101 @@
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="light">
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Car Data Collector — Dashboard</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <style>
-        :root {
-            --bg-soft: #f6f8fb;
-            --card-shadow: 0 1px 2px rgba(15,23,42,.06), 0 1px 3px rgba(15,23,42,.05);
-        }
-        body { background: var(--bg-soft); }
-        .navbar-brand i { color: #0d6efd; }
-        .stat-card { border: 0; box-shadow: var(--card-shadow); transition: transform .15s; }
-        .stat-card:hover { transform: translateY(-2px); }
-        .stat-card .stat-value { font-size: 1.75rem; font-weight: 600; line-height: 1.1; }
-        .stat-card .stat-label { color: #6c757d; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
-        .stat-card i.stat-icon { font-size: 2rem; opacity: .25; }
-        .card { border: 0; box-shadow: var(--card-shadow); }
-        .card-header { background: #fff; border-bottom: 1px solid #eef0f3; font-weight: 500; }
-        .table-container { max-height: 480px; overflow-y: auto; }
-        .table-sm td, .table-sm th { padding: .45rem .6rem; }
-        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; vertical-align: middle; }
-        .status-active { background: #198754; }
-        .status-idle   { background: #adb5bd; }
-        .status-error  { background: #dc3545; }
-        .status-running{ background: #0d6efd; animation: pulse 1.4s infinite; }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-        pre.content-preview {
-            max-height: 360px; overflow-y: auto; background: #f1f3f4;
-            padding: 12px; border-radius: 6px; font-size: .85rem;
-            white-space: pre-wrap; word-break: break-word;
-        }
-        .qa-card { border-left: 3px solid #0d6efd; padding: 10px 14px; margin-bottom: 10px; background: #f8fafc; border-radius: 4px; }
-        .qa-card .q { font-weight: 600; margin-bottom: 4px; color: #0f172a; }
-        .qa-card .a { color: #334155; font-size: .92rem; white-space: pre-wrap; }
-        .qa-card .meta { color: #94a3b8; font-size: .75rem; margin-top: 6px; }
-        .nav-tabs .nav-link { color: #475569; }
-        .nav-tabs .nav-link.active { color: #0d6efd; font-weight: 500; }
-        .system-pill { font-size: .75rem; padding: .2rem .5rem; border-radius: 999px; }
-        .system-pill.ok   { background: #d1fae5; color: #065f46; }
-        .system-pill.bad  { background: #fee2e2; color: #991b1b; }
-        .badge-soft       { background: #e2e8f0; color: #475569; }
-        .clickable-row { cursor: pointer; }
-        .clickable-row:hover { background: #f1f5f9; }
-        .pagination-sm .page-link { padding: .25rem .5rem; }
-        .ollama-models { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; }
-        textarea[readonly] { background: #f8fafc !important; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Car Data Collector</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.2/font/bootstrap-icons.min.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:         #080c18;
+  --bg2:        #0d1220;
+  --bg3:        #111827;
+  --surface:    #141b2d;
+  --surface2:   #1a2236;
+  --border:     rgba(255,255,255,0.07);
+  --border2:    rgba(255,255,255,0.12);
+  --amber:      #f59e0b;
+  --amber-dim:  rgba(245,158,11,0.12);
+  --amber-glow: rgba(245,158,11,0.25);
+  --text:       #e2e8f5;
+  --text-2:     #8892a4;
+  --text-3:     #4b5568;
+  --green:      #22c55e;
+  --red:        #ef4444;
+  --blue:       #3b82f6;
+  --sidebar-w:  220px;
+  --topbar-h:   52px;
+  --mono:       'DM Mono', monospace;
+  --display:    'Syne', sans-serif;
+  --radius:     4px;
+  --radius-lg:  8px;
+}
+
+html { font-size: 14px; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+}
+
+/* ═══════════════════════════════════════════════════
+   SCROLLBAR
+═══════════════════════════════════════════════════ */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+/* ═══════════════════════════════════════════════════
+   SIDEBAR
+═══════════════════════════════════════════════════ */
+.sidebar {
+  width: var(--sidebar-w);
+  min-width: var(--sidebar-w);
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  position: relative;
+  z-index: 100;
+}
+
+.sidebar-logo {
+  padding: 18px 20px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--topbar-h);
+}
+.logo-icon {
+  width: 28px; height: 28px;
+  background: var(--amber-dim);
+  border: 1px solid rgba(245,158,11,0.3);
+  border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.logo-icon i { color: var(--amber); font-size: 13px; }
+.logo-text {
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text);
+  line-height: 1.2;
+}
+.logo-sub {
+  font-size: 9px;
+  color: var(--text-3);
+  letter-spacing: 0.08em;
+  font-weight: 400;
+  margin-top: 1px;
+}
+
+.sidebar-nav {
+  flex: 1;
+  padding: 10px 0;
+  overflow-y: auto;
+}
+
+.nav-section-label {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding: 10px 20px 5px;
+  font-family: var(--display);
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 20px;
+  cursor: pointer;
+  transition: all 0.15s;
+  border-left: 2px solid transparent;
+  font-size: 12.5px;
+  color: var(--text-2);
+  user-select: none;
+  position: relative;
+}
+.nav-item i { font-size: 14px; width: 16px; text-align: center; flex-shrink: 0; }
+.nav-item:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+.nav-item.active {
+  color: var(--amber);
+  background: var(--amber-dim);
+  border-left-color: var(--amber);
+  font-weight: 500;
+}
+
+.sidebar-footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+.logout-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  text-decoration: none;
+  padding: 7px 8px;
+  border-radius: var(--radius);
+  transition: all 0.15s;
+}
+.logout-btn:hover { color: var(--red); background: rgba(239,68,68,0.08); }
+.logout-btn i { font-size: 13px; }
+
+/* ═══════════════════════════════════════════════════
+   MAIN AREA
+═══════════════════════════════════════════════════ */
+.main-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Topbar ── */
+.topbar {
+  height: var(--topbar-h);
+  min-height: var(--topbar-h);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  gap: 12px;
+  z-index: 90;
+}
+
+.topbar-title {
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.04em;
+  margin-right: 4px;
+  display: none;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+  border: 1px solid transparent;
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+.pill.ok   { background: rgba(34,197,94,0.1);  border-color: rgba(34,197,94,0.25);  color: #4ade80; }
+.pill.bad  { background: rgba(239,68,68,0.1);   border-color: rgba(239,68,68,0.25);  color: #f87171; }
+.pill.warn { background: rgba(245,158,11,0.1);  border-color: rgba(245,158,11,0.25); color: var(--amber); }
+.pill .dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.pill.running .dot { animation: blink 1.2s ease-in-out infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.2} }
+
+.topbar-spacer { flex: 1; }
+
+.topbar-time {
+  font-size: 10.5px;
+  color: var(--text-3);
+  letter-spacing: 0.04em;
+}
+
+.icon-btn {
+  width: 30px; height: 30px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all 0.15s;
+  font-size: 13px;
+}
+.icon-btn:hover { border-color: var(--border2); color: var(--text); background: var(--surface); }
+
+/* ── Content ── */
+.content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+/* ═══════════════════════════════════════════════════
+   SECTIONS
+═══════════════════════════════════════════════════ */
+.section { display: none; }
+.section.active { display: block; animation: fade-in 0.2s ease; }
+@keyframes fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+.section-title {
+  font-family: var(--display);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+.section-sub {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-top: 2px;
+  font-family: var(--mono);
+}
+
+/* ═══════════════════════════════════════════════════
+   STAT CARDS
+═══════════════════════════════════════════════════ */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+.stat-card:hover { border-color: var(--border2); }
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--amber), transparent);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.stat-card:hover::before { opacity: 0.6; }
+
+.stat-label {
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 10px;
+  font-family: var(--display);
+  font-weight: 500;
+}
+.stat-value {
+  font-size: 28px;
+  font-weight: 400;
+  color: var(--text);
+  line-height: 1;
+  font-family: var(--mono);
+  letter-spacing: -0.02em;
+}
+.stat-meta {
+  font-size: 10.5px;
+  color: var(--text-3);
+  margin-top: 8px;
+}
+.stat-meta b { color: var(--text-2); }
+.stat-icon {
+  position: absolute;
+  right: 16px; top: 16px;
+  font-size: 22px;
+  color: var(--amber);
+  opacity: 0.18;
+}
+
+/* ═══════════════════════════════════════════════════
+   CARDS / PANELS
+═══════════════════════════════════════════════════ */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.card + .card { margin-top: 16px; }
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 18px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255,255,255,0.02);
+}
+.card-title {
+  font-family: var(--display);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.card-title i { color: var(--amber); font-size: 13px; }
+
+.card-body { padding: 18px; }
+.card-body.no-pad { padding: 0; }
+
+.charts-row {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+/* ═══════════════════════════════════════════════════
+   TABLES
+═══════════════════════════════════════════════════ */
+.tbl-wrap {
+  overflow-x: auto;
+  max-height: 460px;
+  overflow-y: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+thead th {
+  padding: 9px 14px;
+  text-align: left;
+  font-family: var(--display);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+thead th.r { text-align: right; }
+
+tbody tr {
+  border-bottom: 1px solid var(--border);
+  transition: background 0.12s;
+}
+tbody tr:last-child { border-bottom: none; }
+tbody tr:hover { background: rgba(245,158,11,0.04); }
+tbody tr.clickable { cursor: pointer; }
+tbody tr.clickable:hover { background: rgba(245,158,11,0.06); }
+
+td {
+  padding: 9px 14px;
+  color: var(--text-2);
+  vertical-align: middle;
+}
+td.r { text-align: right; }
+td strong { color: var(--text); font-weight: 500; }
+
+/* ═══════════════════════════════════════════════════
+   BADGES
+═══════════════════════════════════════════════════ */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 9.5px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  letter-spacing: 0.05em;
+  font-family: var(--mono);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.badge-default  { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.1); color: var(--text-2); }
+.badge-amber    { background: rgba(245,158,11,0.12);  border-color: rgba(245,158,11,0.25); color: var(--amber); }
+.badge-green    { background: rgba(34,197,94,0.1);    border-color: rgba(34,197,94,0.25);  color: #4ade80; }
+.badge-red      { background: rgba(239,68,68,0.1);    border-color: rgba(239,68,68,0.2);   color: #f87171; }
+.badge-blue     { background: rgba(59,130,246,0.1);   border-color: rgba(59,130,246,0.25); color: #60a5fa; }
+
+.status-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+.dot-green  { background: var(--green); box-shadow: 0 0 5px rgba(34,197,94,0.5); }
+.dot-amber  { background: var(--amber); box-shadow: 0 0 5px rgba(245,158,11,0.5); animation: blink 1.2s ease-in-out infinite; }
+.dot-gray   { background: var(--text-3); }
+.dot-red    { background: var(--red); }
+
+/* ═══════════════════════════════════════════════════
+   PAGINATION
+═══════════════════════════════════════════════════ */
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.pagination > div {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+.page-info { font-size: 11px; color: var(--text-3); flex: 1; min-width: 120px; }
+.page-btn {
+  min-width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 6px;
+  transition: all 0.12s;
+  font-family: var(--mono);
+}
+.page-btn:hover:not(:disabled) { border-color: var(--amber); color: var(--amber); }
+.page-btn.active { background: var(--amber-dim); border-color: var(--amber); color: var(--amber); }
+.page-btn:disabled { opacity: 0.3; cursor: default; }
+
+/* ═══════════════════════════════════════════════════
+   Q/A PAIRS
+═══════════════════════════════════════════════════ */
+.qa-list { display: flex; flex-direction: column; gap: 10px; padding: 16px; max-height: 520px; overflow-y: auto; }
+
+.qa-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--amber);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  transition: border-color 0.15s;
+}
+.qa-card:hover { border-color: var(--border2); border-left-color: var(--amber); }
+.qa-q {
+  font-size: 12.5px;
+  color: var(--amber);
+  font-weight: 500;
+  margin-bottom: 7px;
+  line-height: 1.5;
+}
+.qa-q::before { content: 'Q  '; opacity: 0.5; font-size: 10px; }
+.qa-a {
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.qa-a::before { content: 'A  '; color: var(--text-3); font-size: 10px; }
+.qa-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+/* ═══════════════════════════════════════════════════
+   PIPELINE SECTION
+═══════════════════════════════════════════════════ */
+.pipeline-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 16px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: all 0.15s;
+}
+.btn i { font-size: 13px; }
+.btn:disabled { opacity: 0.4; cursor: default; }
+
+.btn-green  { background: rgba(34,197,94,0.15);  border-color: rgba(34,197,94,0.3);  color: #4ade80; }
+.btn-green:hover:not(:disabled)  { background: rgba(34,197,94,0.25); }
+.btn-red    { background: rgba(239,68,68,0.12);  border-color: rgba(239,68,68,0.3);  color: #f87171; }
+.btn-red:hover:not(:disabled)    { background: rgba(239,68,68,0.22); }
+.btn-amber  { background: var(--amber-dim);       border-color: rgba(245,158,11,0.3); color: var(--amber); }
+.btn-amber:hover:not(:disabled)  { background: rgba(245,158,11,0.2); }
+.btn-ghost  { background: transparent; border-color: var(--border2); color: var(--text-2); }
+.btn-ghost:hover:not(:disabled)  { border-color: var(--text-3); color: var(--text); }
+
+.status-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.state-label {
+  font-family: var(--display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.state-meta { font-size: 11px; color: var(--text-3); }
+
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.banner {
+  padding: 9px 13px;
+  border-radius: var(--radius);
+  font-size: 11.5px;
+  margin-top: 12px;
+  display: none;
+}
+.banner.show { display: block; }
+.banner-info    { background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.25); color: #93c5fd; }
+.banner-success { background: rgba(34,197,94,0.1);  border: 1px solid rgba(34,197,94,0.25);  color: #86efac; }
+.banner-warn    { background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.25); color: #fcd34d; }
+.banner-error   { background: rgba(239,68,68,0.1);  border: 1px solid rgba(239,68,68,0.25);  color: #fca5a5; }
+
+.terminal {
+  background: #040608;
+  border-radius: var(--radius);
+  padding: 14px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: #a0aec0;
+  max-height: 380px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.terminal:empty::before { content: 'No logs yet. Start the pipeline to see output here.'; color: var(--text-3); }
+
+.export-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+select.form-select {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 8px 12px;
+  outline: none;
+  cursor: pointer;
+}
+select.form-select:focus { border-color: var(--amber); }
+
+input[type=number], input[type=text] {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 8px 12px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+input[type=number]:focus, input[type=text]:focus { border-color: var(--amber); }
+
+/* ═══════════════════════════════════════════════════
+   SYSTEM CARDS
+═══════════════════════════════════════════════════ */
+.sys-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.sys-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+}
+.sys-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.sys-card-name {
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.sys-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
+}
+.sys-row:last-child { border-bottom: none; }
+.sys-row .key { color: var(--text-3); }
+.sys-row .val { color: var(--text-2); font-family: var(--mono); }
+.sys-row code {
+  background: var(--bg2);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10.5px;
+  color: var(--amber);
+  font-family: var(--mono);
+}
+
+/* ═══════════════════════════════════════════════════
+   ROUNDS TABLE
+═══════════════════════════════════════════════════ */
+.round-status-running     { color: var(--amber); }
+.round-status-completed   { color: var(--green); }
+.round-status-failed      { color: var(--red); }
+.round-status-interrupted { color: var(--text-3); }
+
+/* ═══════════════════════════════════════════════════
+   FILTERS ROW
+═══════════════════════════════════════════════════ */
+.filters-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(255,255,255,0.02);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.filters-row input, .filters-row select {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.filters-row .btn { padding: 5px 12px; font-size: 11px; }
+
+/* ═══════════════════════════════════════════════════
+   DRAWER
+═══════════════════════════════════════════════════ */
+.drawer-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 200;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+  backdrop-filter: blur(2px);
+}
+.drawer-overlay.open { opacity: 1; pointer-events: all; }
+
+.drawer {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: 540px;
+  background: var(--bg2);
+  border-left: 1px solid var(--border);
+  z-index: 201;
+  transform: translateX(100%);
+  transition: transform 0.25s cubic-bezier(0.16,1,0.3,1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.drawer.open { transform: translateX(0); }
+
+.drawer-head {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.drawer-title {
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+}
+.drawer-close {
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+  font-size: 15px;
+}
+.drawer-close:hover { border-color: var(--red); color: var(--red); }
+
+.drawer-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.drawer-meta-item { font-size: 11px; }
+.drawer-meta-item .key { color: var(--text-3); margin-bottom: 2px; }
+.drawer-meta-item .val { color: var(--text-2); }
+
+.drawer-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.dtab {
+  padding: 9px 18px;
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+.dtab:hover { color: var(--text); }
+.dtab.active { color: var(--amber); border-bottom-color: var(--amber); }
+
+.drawer-body { flex: 1; overflow-y: auto; }
+.dtab-pane { display: none; padding: 16px 20px; }
+.dtab-pane.active { display: block; }
+
+.content-pre {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+}
+
+/* ═══════════════════════════════════════════════════
+   QA STATS MINI CARDS
+═══════════════════════════════════════════════════ */
+.qa-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.qa-stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+}
+.qa-stat .label { font-size: 9.5px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text-3); font-family: var(--display); margin-bottom: 6px; }
+.qa-stat .value { font-size: 22px; color: var(--text); font-family: var(--mono); }
+
+/* ═══════════════════════════════════════════════════
+   MISC
+═══════════════════════════════════════════════════ */
+.empty-state {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.empty-state i { font-size: 28px; display: block; margin-bottom: 10px; opacity: 0.4; }
+
+a { color: var(--amber); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.max-w-sm { max-width: 300px; }
+.max-w-xs { max-width: 200px; }
+
+/* ═══════════════════════════════════════════════════
+   SOURCE TOGGLE SWITCH
+═══════════════════════════════════════════════════ */
+.toggle-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 34px;
+  height: 18px;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: all 0.2s;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.toggle-btn.on  { background: rgba(34,197,94,0.2);  border-color: rgba(34,197,94,0.4); }
+.toggle-btn.off { background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.3); }
+.toggle-dot {
+  position: absolute;
+  width: 12px; height: 12px;
+  background: var(--text-3);
+  border-radius: 50%;
+  left: 2px;
+  transition: transform 0.2s, background 0.2s;
+}
+.toggle-btn.on  .toggle-dot { transform: translateX(16px); background: var(--green); }
+.toggle-btn.off .toggle-dot { background: #f87171; }
+
+.interval-cell {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  transition: background 0.15s;
+}
+.interval-cell:hover { background: var(--surface2); }
+
+/* ═══════════════════════════════════════════════════
+   TOPBAR STOP BUTTON
+═══════════════════════════════════════════════════ */
+.topbar-stop {
+  display: none;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  background: rgba(239,68,68,0.15);
+  border: 1px solid rgba(239,68,68,0.35);
+  border-radius: var(--radius);
+  color: #f87171;
+  cursor: pointer;
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: all 0.15s;
+}
+.topbar-stop:hover { background: rgba(239,68,68,0.25); }
+.topbar-stop.show { display: inline-flex; }
+</style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom shadow-sm">
-    <div class="container-fluid">
-        <a class="navbar-brand fw-semibold" href="#">
-            <i class="bi bi-car-front-fill me-2"></i>Car Data Collector
-        </a>
-        <div class="d-flex align-items-center gap-3">
-            <span class="system-pill" id="pgPill">Postgres ?</span>
-            <span class="system-pill" id="redisPill">Redis ?</span>
-            <span class="system-pill" id="ollamaPill">Ollama ?</span>
-            <span class="text-muted small" id="lastUpdate">—</span>
-            <button class="btn btn-sm btn-outline-secondary" onclick="refreshAll()" title="Refresh">
-                <i class="bi bi-arrow-clockwise"></i>
-            </button>
-        </div>
+
+<!-- ═══════ SIDEBAR ═══════ -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-icon"><i class="bi bi-cpu"></i></div>
+    <div>
+      <div class="logo-text">CarData</div>
+      <div class="logo-sub">Collector</div>
     </div>
-</nav>
+  </div>
 
-<div class="container-fluid py-4">
-    <!-- Stat cards -->
-    <div class="row g-3 mb-4">
-        <div class="col-md-3">
-            <div class="card stat-card h-100">
-                <div class="card-body d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="stat-label">Documents</div>
-                        <div class="stat-value" id="totalDocs">—</div>
-                        <small class="text-muted">Unique: <span id="uniqueDocs">—</span> · Dup: <span id="duplicateDocs">—</span></small>
-                    </div>
-                    <i class="bi bi-file-text stat-icon text-primary"></i>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card stat-card h-100">
-                <div class="card-body d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="stat-label">Q/A pairs</div>
-                        <div class="stat-value" id="totalQA">—</div>
-                        <small class="text-muted">Pending docs: <span id="pendingQA">—</span></small>
-                    </div>
-                    <i class="bi bi-chat-dots stat-icon text-success"></i>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card stat-card h-100">
-                <div class="card-body d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="stat-label">Sources</div>
-                        <div class="stat-value"><span id="activeSources">—</span> / <span id="totalSources">—</span></div>
-                        <small class="text-muted">Active in DB / configured</small>
-                    </div>
-                    <i class="bi bi-globe stat-icon text-info"></i>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card stat-card h-100">
-                <div class="card-body d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="stat-label">Disk</div>
-                        <div class="stat-value"><span id="diskUsage">—</span>%</div>
-                        <small class="text-muted">Free: <span id="diskFree">—</span> GB · Round <span id="lastRound">—</span></small>
-                    </div>
-                    <i class="bi bi-hdd stat-icon text-warning"></i>
-                </div>
-            </div>
-        </div>
+  <nav class="sidebar-nav">
+    <div class="nav-section-label">Monitor</div>
+    <div class="nav-item active" data-section="overview">
+      <i class="bi bi-grid-1x2"></i> Overview
     </div>
-
-    <!-- Tabs -->
-    <ul class="nav nav-tabs mb-3" id="mainTabs">
-        <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-overview">Overview</button></li>
-        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-sources">Sources</button></li>
-        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-data">Documents</button></li>
-        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-qa">Q&amp;A Pairs</button></li>
-        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-rounds">Rounds</button></li>
-        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-system">System</button></li>
-    </ul>
-
-    <div class="tab-content">
-
-      <!-- ===== Overview ===== -->
-      <div class="tab-pane fade show active" id="tab-overview">
-        <div class="row g-3">
-            <div class="col-md-8">
-                <div class="card h-100"><div class="card-header"><i class="bi bi-graph-up me-2"></i>Activity (last 14 days)</div>
-                    <div class="card-body"><canvas id="trendsChart" height="120"></canvas></div></div>
-            </div>
-            <div class="col-md-4">
-                <div class="card h-100"><div class="card-header"><i class="bi bi-pie-chart me-2"></i>Source distribution</div>
-                    <div class="card-body"><canvas id="distributionChart" height="160"></canvas></div></div>
-            </div>
-        </div>
-      </div>
-
-      <!-- ===== Sources ===== -->
-      <div class="tab-pane fade" id="tab-sources">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <span><i class="bi bi-list-check me-2"></i>Sources</span>
-                <span class="badge badge-soft" id="sourceCount">0</span>
-            </div>
-            <div class="card-body p-0 table-container">
-                <table class="table table-hover table-sm mb-0">
-                    <thead class="table-light sticky-top">
-                        <tr>
-                            <th>Source</th><th>Type</th><th>Status</th>
-                            <th class="text-end">Total</th>
-                            <th class="text-end">Unique</th>
-                            <th class="text-end">Q/A</th>
-                            <th>Last scrape</th>
-                        </tr>
-                    </thead>
-                    <tbody id="sourcesTable">
-                        <tr><td colspan="7" class="text-center text-muted">Loading…</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-      </div>
-
-      <!-- ===== Documents ===== -->
-      <div class="tab-pane fade" id="tab-data">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <span><i class="bi bi-database me-2"></i>Documents</span>
-                <div class="d-flex gap-2 flex-wrap">
-                    <select class="form-select form-select-sm" id="docSourceFilter" style="width: 180px;">
-                        <option value="">All sources</option>
-                    </select>
-                    <select class="form-select form-select-sm" id="docHasQA" style="width: 130px;">
-                        <option value="">Q/A any</option>
-                        <option value="1">With Q/A</option>
-                        <option value="0">Without Q/A</option>
-                    </select>
-                    <input type="text" class="form-control form-control-sm" id="docSearch"
-                           placeholder="Search title / URL / text…" style="width: 240px;">
-                    <button class="btn btn-sm btn-primary" onclick="fetchData(1)"><i class="bi bi-search"></i></button>
-                </div>
-            </div>
-            <div class="card-body p-0 table-container">
-                <table class="table table-hover table-sm mb-0">
-                    <thead class="table-light sticky-top">
-                        <tr>
-                            <th>Title</th><th>Source</th><th>Stage</th>
-                            <th class="text-end">Words</th>
-                            <th class="text-end">Q/A</th>
-                            <th>Date</th>
-                        </tr>
-                    </thead>
-                    <tbody id="dataTable">
-                        <tr><td colspan="6" class="text-center text-muted">Loading…</td></tr>
-                    </tbody>
-                </table>
-            </div>
-            <div class="card-footer d-flex justify-content-between align-items-center">
-                <small class="text-muted">Showing <span id="docShowing">0</span> of <span id="docTotal">0</span></small>
-                <nav><ul class="pagination pagination-sm mb-0" id="docPagination"></ul></nav>
-            </div>
-        </div>
-      </div>
-
-      <!-- ===== Q/A ===== -->
-      <div class="tab-pane fade" id="tab-qa">
-        <div class="row g-3 mb-3">
-            <div class="col-md-3">
-                <div class="card stat-card"><div class="card-body py-3">
-                    <div class="stat-label">Total Q/A</div>
-                    <div class="stat-value" id="qaTotal">—</div>
-                </div></div>
-            </div>
-            <div class="col-md-3">
-                <div class="card stat-card"><div class="card-body py-3">
-                    <div class="stat-label">Avg Q length</div>
-                    <div class="stat-value" id="qaAvgQ">—</div>
-                </div></div>
-            </div>
-            <div class="col-md-3">
-                <div class="card stat-card"><div class="card-body py-3">
-                    <div class="stat-label">Avg A length</div>
-                    <div class="stat-value" id="qaAvgA">—</div>
-                </div></div>
-            </div>
-            <div class="col-md-3">
-                <div class="card stat-card"><div class="card-body py-3">
-                    <div class="stat-label">Avg quality</div>
-                    <div class="stat-value" id="qaAvgQuality">—</div>
-                </div></div>
-            </div>
-        </div>
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <span><i class="bi bi-chat-dots me-2"></i>Q/A pairs</span>
-                <div class="d-flex gap-2 flex-wrap align-items-center">
-                    <select class="form-select form-select-sm" id="qaSourceFilter" style="width: 180px;">
-                        <option value="">All sources</option>
-                    </select>
-                    <input type="text" class="form-control form-control-sm" id="qaSearch"
-                           placeholder="Search Q or A…" style="width: 240px;">
-                    <button class="btn btn-sm btn-primary" onclick="fetchQA(1)"><i class="bi bi-search"></i></button>
-                    <div class="vr"></div>
-                    <input type="number" min="1" max="50" value="5" id="qaBatchSize"
-                           class="form-control form-control-sm" style="width: 80px;" title="Batch size">
-                    <button class="btn btn-sm btn-success" id="qaTriggerBtn" onclick="triggerQAGeneration()">
-                        <i class="bi bi-play-fill"></i> Generate
-                    </button>
-                </div>
-            </div>
-            <div class="card-body" id="qaList" style="max-height: 600px; overflow-y: auto;">
-                <div class="text-center text-muted">Loading…</div>
-            </div>
-            <div class="card-footer d-flex justify-content-between align-items-center">
-                <small class="text-muted">Showing <span id="qaShowing">0</span> of <span id="qaTotalCount">0</span></small>
-                <nav><ul class="pagination pagination-sm mb-0" id="qaPagination"></ul></nav>
-            </div>
-        </div>
-        <div id="qaJobBanner" class="alert alert-info mt-3 d-none"></div>
-      </div>
-
-      <!-- ===== Rounds ===== -->
-      <div class="tab-pane fade" id="tab-rounds">
-        <div class="card">
-            <div class="card-header"><i class="bi bi-arrow-repeat me-2"></i>Recent rounds</div>
-            <div class="card-body p-0 table-container">
-                <table class="table table-sm mb-0">
-                    <thead class="table-light sticky-top">
-                        <tr>
-                            <th>#</th><th>Status</th><th>Started</th><th>Ended</th>
-                            <th class="text-end">Scraped</th>
-                            <th class="text-end">Stored</th>
-                            <th class="text-end">Duplicates</th>
-                            <th class="text-end">Q/A</th>
-                            <th class="text-end">Errors</th>
-                        </tr>
-                    </thead>
-                    <tbody id="roundsTable">
-                        <tr><td colspan="9" class="text-center text-muted">Loading…</td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-      </div>
-
-      <!-- ===== System ===== -->
-      <div class="tab-pane fade" id="tab-system">
-        <div class="row g-3">
-            <div class="col-md-4">
-                <div class="card h-100"><div class="card-header">PostgreSQL</div>
-                    <div class="card-body" id="sysPg">Loading…</div></div>
-            </div>
-            <div class="col-md-4">
-                <div class="card h-100"><div class="card-header">Redis</div>
-                    <div class="card-body" id="sysRedis">Loading…</div></div>
-            </div>
-            <div class="col-md-4">
-                <div class="card h-100"><div class="card-header">Ollama</div>
-                    <div class="card-body" id="sysOllama">Loading…</div></div>
-            </div>
-        </div>
-        <div class="card mt-3">
-            <div class="card-header"><i class="bi bi-info-circle me-2"></i>Dashboard info</div>
-            <div class="card-body">
-                <p class="mb-1 small text-muted">The dashboard reads from PostgreSQL and Redis. Q/A generation uses Ollama via the configured URL.</p>
-                <p class="mb-0 small text-muted">Manual generation is available on the Q/A tab. Continuous pipeline is started with <code>python -m src.main run</code>.</p>
-            </div>
-        </div>
-      </div>
-
+    <div class="nav-item" data-section="sources">
+      <i class="bi bi-globe2"></i> Sources
     </div>
+    <div class="nav-section-label">Data</div>
+    <div class="nav-item" data-section="documents">
+      <i class="bi bi-file-text"></i> Documents
+    </div>
+    <div class="nav-item" data-section="qa">
+      <i class="bi bi-chat-square-dots"></i> Q&amp;A Pairs
+    </div>
+    <div class="nav-item" data-section="rounds">
+      <i class="bi bi-arrow-repeat"></i> Rounds
+    </div>
+    <div class="nav-section-label">Control</div>
+    <div class="nav-item" data-section="pipeline">
+      <i class="bi bi-play-circle"></i> Pipeline
+    </div>
+    <div class="nav-item" data-section="system">
+      <i class="bi bi-hdd-rack"></i> System
+    </div>
+  </nav>
+
+  <div class="sidebar-footer">
+    <a href="/logout" class="logout-btn">
+      <i class="bi bi-box-arrow-left"></i> Sign out
+    </a>
+  </div>
+</aside>
+
+<!-- ═══════ MAIN ═══════ -->
+<div class="main-wrap">
+
+  <!-- Topbar -->
+  <header class="topbar">
+    <span id="pipelinePill" class="pill bad"><span class="dot"></span>Pipeline</span>
+    <span id="pgPill"     class="pill bad"><span class="dot"></span>Postgres</span>
+    <span id="redisPill"  class="pill bad"><span class="dot"></span>Redis</span>
+    <span id="ollamaPill" class="pill bad"><span class="dot"></span>Ollama</span>
+    <span class="topbar-spacer"></span>
+    <button class="topbar-stop" id="topbarStopScrape" onclick="scrapeStop()" title="Stop scrape loop">
+      <i class="bi bi-stop-fill"></i> Stop Scrape
+    </button>
+    <button class="topbar-stop" id="topbarStopQA" onclick="qaLoopStop()" title="Stop Q/A loop">
+      <i class="bi bi-stop-fill"></i> Stop Q/A
+    </button>
+    <span class="topbar-time" id="lastUpdate">—</span>
+    <button class="icon-btn" onclick="refreshAll()" title="Refresh"><i class="bi bi-arrow-clockwise"></i></button>
+  </header>
+
+  <!-- Content -->
+  <main class="content">
+
+    <!-- ══ OVERVIEW ══ -->
+    <section id="overview" class="section active">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Overview</div>
+          <div class="section-sub">Real-time pipeline metrics</div>
+        </div>
+        <span class="badge badge-default" id="lastRoundBadge">Round —</span>
+      </div>
+
+      <div class="stat-grid">
+        <div class="stat-card">
+          <i class="bi bi-file-text stat-icon"></i>
+          <div class="stat-label">Documents</div>
+          <div class="stat-value" id="totalDocs">—</div>
+          <div class="stat-meta">Unique: <b id="uniqueDocs">—</b> &nbsp;·&nbsp; Dup: <b id="duplicateDocs">—</b></div>
+        </div>
+        <div class="stat-card">
+          <i class="bi bi-chat-dots stat-icon"></i>
+          <div class="stat-label">Q/A Pairs</div>
+          <div class="stat-value" id="totalQA">—</div>
+          <div class="stat-meta">Pending docs: <b id="pendingQA">—</b></div>
+        </div>
+        <div class="stat-card">
+          <i class="bi bi-globe2 stat-icon"></i>
+          <div class="stat-label">Sources</div>
+          <div class="stat-value"><span id="activeSources">—</span><span style="font-size:14px;color:var(--text-3)"> / <span id="totalSources">—</span></span></div>
+          <div class="stat-meta">Active in DB / configured</div>
+        </div>
+        <div class="stat-card">
+          <i class="bi bi-hdd stat-icon"></i>
+          <div class="stat-label">Disk Usage</div>
+          <div class="stat-value"><span id="diskUsage">—</span><span style="font-size:14px;color:var(--text-3)">%</span></div>
+          <div class="stat-meta">Free: <b id="diskFree">—</b> GB</div>
+        </div>
+      </div>
+
+      <div class="charts-row">
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title"><i class="bi bi-graph-up"></i> Activity — 14 days</span>
+            <span class="badge badge-default">scraped · qa · duplicates</span>
+          </div>
+          <div class="card-body" style="height:220px;position:relative;">
+            <canvas id="trendsChart"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title"><i class="bi bi-pie-chart"></i> Source Distribution</span>
+          </div>
+          <div class="card-body" style="height:220px;position:relative;">
+            <canvas id="distributionChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ SOURCES ══ -->
+    <section id="sources" class="section">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Sources</div>
+          <div class="section-sub">Configured scraping targets</div>
+        </div>
+        <span class="badge badge-amber" id="sourceCountBadge">0 sources</span>
+      </div>
+      <div class="card">
+        <div style="padding:8px 14px;background:rgba(245,158,11,0.05);border-bottom:1px solid var(--border);font-size:10.5px;color:var(--text-3);">
+          <i class="bi bi-info-circle" style="color:var(--amber);"></i>
+          Toggle or interval changes are saved immediately. A running pipeline picks up changes on the next restart.
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Source</th><th>Type</th><th>Enabled</th>
+                <th>Interval <span style="font-weight:400;opacity:0.6;">(dbl-click to edit)</span></th>
+                <th class="r">Total</th><th class="r">Unique</th><th class="r">Q/A</th>
+                <th>Last scrape</th>
+              </tr>
+            </thead>
+            <tbody id="sourcesBody">
+              <tr><td colspan="8"><div class="empty-state"><i class="bi bi-hourglass"></i>Loading…</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ DOCUMENTS ══ -->
+    <section id="documents" class="section">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Documents</div>
+          <div class="section-sub">Click any row to inspect content</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="filters-row">
+          <select id="docSourceFilter" class="form-select" style="width:160px;">
+            <option value="">All sources</option>
+          </select>
+          <select id="docHasQA" class="form-select" style="width:120px;">
+            <option value="">Q/A: any</option>
+            <option value="1">With Q/A</option>
+            <option value="0">Without Q/A</option>
+          </select>
+          <input type="text" id="docSearch" placeholder="Search title / URL…" style="width:220px;">
+          <button class="btn btn-amber" onclick="fetchDocs(1)"><i class="bi bi-search"></i> Search</button>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Title</th><th>Source</th><th>Stage</th>
+                <th class="r">Words</th><th class="r">Q/A</th><th>Date</th>
+              </tr>
+            </thead>
+            <tbody id="docsBody">
+              <tr><td colspan="6"><div class="empty-state"><i class="bi bi-hourglass"></i>Loading…</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination">
+          <span class="page-info">Showing <span id="docShowing">0</span> of <span id="docTotal">0</span></span>
+          <div id="docPager"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Q/A PAIRS ══ -->
+    <section id="qa" class="section">
+      <div class="section-header">
+        <div><div class="section-title">Q/A Pairs</div><div class="section-sub">Generated training data</div></div>
+      </div>
+
+      <div class="qa-stat-grid">
+        <div class="qa-stat"><div class="label">Total Pairs</div><div class="value" id="qaTotal">—</div></div>
+        <div class="qa-stat"><div class="label">Pending Docs</div><div class="value" id="qaPendingDocs" style="color:var(--amber);">—</div></div>
+        <div class="qa-stat"><div class="label">Avg Q Length</div><div class="value" id="qaAvgQ">—</div></div>
+        <div class="qa-stat"><div class="label">Avg Quality</div><div class="value" id="qaAvgQuality">—</div></div>
+      </div>
+
+      <!-- Q/A Pipeline Control -->
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-head">
+          <span class="card-title"><i class="bi bi-cpu"></i> Q/A Pipeline</span>
+          <span id="qaPipelineStatusPill" class="pill bad"><span class="dot"></span>Idle</span>
+        </div>
+        <div class="card-body">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <div style="font-size:11.5px;color:var(--text-3);line-height:1.5;flex:1;min-width:200px;">
+              Process all pending documents through Ollama and generate Q/A pairs.
+              Runs until every eligible document is processed.
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <label style="font-size:11px;color:var(--text-3);">Batch:</label>
+              <input type="number" id="qaPipelineBatch" value="5" min="1" max="50" style="width:65px;">
+              <button class="btn btn-green" id="qaPipelineStartBtn" onclick="qaPipelineStart()">
+                <i class="bi bi-play-fill"></i> Run All Pending
+              </button>
+              <button class="btn btn-red" id="qaPipelineStopBtn" onclick="qaPipelineStop()" disabled>
+                <i class="bi bi-stop-fill"></i> Stop
+              </button>
+            </div>
+          </div>
+          <div class="banner" id="qaPipelineBanner" style="margin-top:10px;"></div>
+        </div>
+      </div>
+
+      <!-- Quick generate (small batch) -->
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title"><i class="bi bi-chat-square-dots"></i> Q/A Pairs</span>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <select id="qaSourceFilter" class="form-select" style="width:150px;"><option value="">All sources</option></select>
+            <input type="text" id="qaSearch" placeholder="Search Q or A…" style="width:200px;">
+            <button class="btn btn-amber" onclick="fetchQA(1)" style="padding:5px 10px;font-size:11px;"><i class="bi bi-search"></i></button>
+          </div>
+        </div>
+        <div id="qaJobBanner" class="banner" style="margin:10px 14px 0;"></div>
+        <div style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;">
+          <label style="font-size:11px;color:var(--text-3);">Quick generate (small batch):</label>
+          <input type="number" id="qaBatchSize" value="5" min="1" max="50" style="width:65px;">
+          <button class="btn btn-ghost" id="qaGenerateBtn" onclick="triggerQA()" style="padding:5px 10px;font-size:11px;">
+            <i class="bi bi-play-fill"></i> Generate Batch
+          </button>
+        </div>
+        <div class="qa-list" id="qaList">
+          <div class="empty-state"><i class="bi bi-hourglass"></i>Loading…</div>
+        </div>
+        <div class="pagination">
+          <span class="page-info">Showing <span id="qaShowing">0</span> of <span id="qaTotalCount">0</span></span>
+          <div id="qaPager"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ ROUNDS ══ -->
+    <section id="rounds" class="section">
+      <div class="section-header">
+        <div><div class="section-title">Pipeline Rounds</div><div class="section-sub">Execution history</div></div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="btn btn-ghost" onclick="cleanupRounds()" style="font-size:11px;padding:5px 12px;">
+            <i class="bi bi-eraser"></i> Fix Stale Rounds
+          </button>
+          <button class="btn btn-ghost" onclick="fetchRounds()" style="font-size:11px;padding:5px 12px;">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+          </button>
+        </div>
+      </div>
+      <div class="banner" id="roundsCleanupBanner" style="margin-bottom:12px;"></div>
+      <div class="card">
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th><th>Status</th><th>Started</th><th>Ended</th>
+                <th class="r">Scraped</th><th class="r">Stored</th>
+                <th class="r">Dups</th><th class="r">Q/A</th><th class="r">Errors</th>
+              </tr>
+            </thead>
+            <tbody id="roundsBody">
+              <tr><td colspan="9"><div class="empty-state"><i class="bi bi-hourglass"></i>Loading…</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ PIPELINE ══ -->
+    <section id="pipeline" class="section">
+      <div class="section-header">
+        <div><div class="section-title">Pipeline Control</div><div class="section-sub">Separate scraping and Q/A generation processes</div></div>
+      </div>
+
+      <div class="pipeline-grid">
+        <!-- Scraping Loop -->
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title"><i class="bi bi-radar"></i> Scraping Loop</span>
+            <span id="scrapePill" class="pill bad"><span class="dot"></span>Idle</span>
+          </div>
+          <div class="card-body">
+            <div class="status-state">
+              <span class="status-dot dot-gray" id="scrapeDot"></span>
+              <div>
+                <div class="state-label" id="scrapeLabel">Stopped</div>
+                <div class="state-meta" id="scrapeMeta">Fetches &amp; stores documents from all sources</div>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-green" id="scrapeStartBtn" onclick="scrapeStart()">
+                <i class="bi bi-play-fill"></i> Start
+              </button>
+              <button class="btn btn-red" id="scrapeStopBtn" onclick="scrapeStop()" disabled>
+                <i class="bi bi-stop-fill"></i> Stop
+              </button>
+            </div>
+            <div class="banner" id="scrapeBanner"></div>
+          </div>
+        </div>
+
+        <!-- Q/A Loop -->
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title"><i class="bi bi-chat-square-text"></i> Q/A Loop</span>
+            <span id="qaLoopPill" class="pill bad"><span class="dot"></span>Idle</span>
+          </div>
+          <div class="card-body">
+            <div class="status-state">
+              <span class="status-dot dot-gray" id="qaLoopDot"></span>
+              <div>
+                <div class="state-label" id="qaLoopLabel">Stopped</div>
+                <div class="state-meta" id="qaLoopMeta">Generates Q/A pairs via Ollama continuously</div>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-green" id="qaLoopStartBtn" onclick="qaLoopStart()">
+                <i class="bi bi-play-fill"></i> Start
+              </button>
+              <button class="btn btn-red" id="qaLoopStopBtn" onclick="qaLoopStop()" disabled>
+                <i class="bi bi-stop-fill"></i> Stop
+              </button>
+            </div>
+            <div class="banner" id="qaLoopBanner"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Log Output (shared, source selectable) -->
+      <div class="card" style="margin-top:16px;">
+        <div class="card-head">
+          <span class="card-title"><i class="bi bi-terminal"></i> Log Output</span>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <select id="logsSource" class="form-select" style="width:140px;" onchange="fetchLogs()">
+              <option value="scrape">Scrape Loop</option>
+              <option value="qa-loop">Q/A Loop</option>
+            </select>
+            <label style="font-size:11px;color:var(--text-3);display:flex;align-items:center;gap:5px;cursor:pointer;">
+              <input type="checkbox" id="logsAutoRefresh" checked style="accent-color:var(--amber);"> Auto-scroll
+            </label>
+            <select id="logsLineCount" class="form-select" style="width:100px;" onchange="fetchLogs()">
+              <option value="100">100 lines</option>
+              <option value="200" selected>200 lines</option>
+              <option value="500">500 lines</option>
+            </select>
+            <button class="icon-btn" onclick="fetchLogs()"><i class="bi bi-arrow-clockwise"></i></button>
+          </div>
+        </div>
+        <div class="card-body">
+          <pre class="terminal" id="pipelineLogs"></pre>
+          <div style="font-size:10px;color:var(--text-3);margin-top:8px;">Log: <code id="logFilePath" style="color:var(--text-2);">—</code></div>
+        </div>
+      </div>
+
+      <!-- Export Q/A -->
+      <div class="card" style="margin-top:16px;">
+        <div class="card-head"><span class="card-title"><i class="bi bi-file-earmark-arrow-down"></i> Export Q/A</span></div>
+        <div class="card-body">
+          <p style="font-size:11.5px;color:var(--text-3);margin-bottom:14px;line-height:1.6;">
+            Export all Q/A pairs to <code style="color:var(--amber);background:var(--bg2);padding:1px 5px;border-radius:3px;">data/qa_output/</code> for LLM fine-tuning.
+          </p>
+          <div class="export-row">
+            <select id="exportFormat" class="form-select" style="width:160px;">
+              <option value="jsonl">JSONL (flat)</option>
+              <option value="json">JSON (flat)</option>
+              <option value="huggingface">HuggingFace (chat)</option>
+            </select>
+            <button class="btn btn-amber" onclick="exportQA()"><i class="bi bi-download"></i> Export</button>
+          </div>
+          <div class="banner" id="exportBanner"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ SYSTEM ══ -->
+    <section id="system" class="section">
+      <div class="section-header">
+        <div><div class="section-title">System Status</div><div class="section-sub">Infrastructure health</div></div>
+        <button class="btn btn-ghost" onclick="fetchSystem()"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+      </div>
+
+      <div class="sys-grid">
+        <div class="sys-card">
+          <div class="sys-card-header">
+            <span class="sys-card-name">PostgreSQL</span>
+            <span id="pgStatus" class="badge badge-default">—</span>
+          </div>
+          <div id="pgDetails">
+            <div class="empty-state" style="padding:16px 0;"><i class="bi bi-hourglass"></i>Loading…</div>
+          </div>
+        </div>
+        <div class="sys-card">
+          <div class="sys-card-header">
+            <span class="sys-card-name">Redis</span>
+            <span id="redisStatus" class="badge badge-default">—</span>
+          </div>
+          <div id="redisDetails">
+            <div class="empty-state" style="padding:16px 0;"><i class="bi bi-hourglass"></i>Loading…</div>
+          </div>
+        </div>
+        <div class="sys-card">
+          <div class="sys-card-header">
+            <span class="sys-card-name">Ollama</span>
+            <span id="ollamaStatus" class="badge badge-default">—</span>
+          </div>
+          <div id="ollamaDetails">
+            <div class="empty-state" style="padding:16px 0;"><i class="bi bi-hourglass"></i>Loading…</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
 </div>
 
-<!-- ============ Document detail modal ============ -->
-<div class="modal fade" id="docModal" tabindex="-1">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="docModalTitle">Document</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <div class="row g-2 mb-3 small">
-                    <div class="col-md-3"><strong>Source:</strong> <span id="docSource">—</span></div>
-                    <div class="col-md-3"><strong>Category:</strong> <span id="docCategory">—</span></div>
-                    <div class="col-md-3"><strong>Author:</strong> <span id="docAuthor">—</span></div>
-                    <div class="col-md-3"><strong>Stage:</strong> <span id="docStage">—</span></div>
-                    <div class="col-md-3"><strong>Words:</strong> <span id="docWords">—</span></div>
-                    <div class="col-md-3"><strong>Q/A count:</strong> <span id="docQACount">—</span></div>
-                    <div class="col-md-3"><strong>Round:</strong> <span id="docRound">—</span></div>
-                    <div class="col-md-3"><strong>Date:</strong> <span id="docDate">—</span></div>
-                </div>
-                <div class="mb-3"><strong>URL:</strong> <a href="#" id="docUrl" target="_blank" class="text-break">—</a></div>
-                <ul class="nav nav-pills mb-2" id="docInnerTabs">
-                    <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#doc-content">Content</button></li>
-                    <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#doc-qa">Q/A <span class="badge bg-secondary" id="docQABadge">0</span></button></li>
-                </ul>
-                <div class="tab-content">
-                    <div class="tab-pane fade show active" id="doc-content">
-                        <pre class="content-preview" id="docContent">—</pre>
-                    </div>
-                    <div class="tab-pane fade" id="doc-qa">
-                        <div id="docQAList" class="mt-2"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
+<!-- ═══════ DRAWER ═══════ -->
+<div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer">
+  <div class="drawer-head">
+    <div class="drawer-title" id="drawerTitle">Document</div>
+    <button class="drawer-close" onclick="closeDrawer()"><i class="bi bi-x-lg"></i></button>
+  </div>
+  <div class="drawer-meta" id="drawerMeta"></div>
+  <div class="drawer-tabs">
+    <div class="dtab active" data-dtab="content">Content</div>
+    <div class="dtab" data-dtab="dqa">Q/A <span id="drawerQACount" class="badge badge-amber" style="margin-left:4px;">0</span></div>
+  </div>
+  <div class="drawer-body">
+    <div class="dtab-pane active" id="dtab-content">
+      <pre class="content-pre" id="drawerContent">—</pre>
     </div>
+    <div class="dtab-pane" id="dtab-dqa">
+      <div id="drawerQAList"></div>
+    </div>
+  </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-const REFRESH_INTERVAL = 30000;
-let trendsChart = null;
-let distributionChart = null;
+const REFRESH_MS = 30000;
+let trendsChart = null, distChart = null;
 let docPage = 1, qaPage = 1;
 let qaPollTimer = null;
 
-document.addEventListener('DOMContentLoaded', () => {
-    refreshAll();
-    setInterval(refreshAll, REFRESH_INTERVAL);
-    document.getElementById('docSearch').addEventListener('keydown', e => { if (e.key === 'Enter') fetchData(1); });
-    document.getElementById('qaSearch').addEventListener('keydown', e => { if (e.key === 'Enter') fetchQA(1); });
-    document.getElementById('docSourceFilter').addEventListener('change', () => fetchData(1));
-    document.getElementById('docHasQA').addEventListener('change', () => fetchData(1));
-    document.getElementById('qaSourceFilter').addEventListener('change', () => fetchQA(1));
-});
+// ══ Navigation ══════════════════════════════════════
+function showSection(name) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const sec = document.getElementById(name);
+  if (sec) sec.classList.add('active');
+  const nav = document.querySelector(`.nav-item[data-section="${name}"]`);
+  if (nav) nav.classList.add('active');
 
+  if (name === 'pipeline') { fetchPipelineStatus(); fetchQAPipelineStatus(); fetchLogs(); }
+  if (name === 'system')   fetchSystem();
+  if (name === 'sources')  fetchSources();
+  if (name === 'documents'){ fetchDocs(1); }
+  if (name === 'qa')       { fetchQA(1); fetchQAStats(); fetchQAPipelineStatus(); }
+  if (name === 'rounds')   fetchRounds();
+}
+
+document.querySelectorAll('.nav-item').forEach(n =>
+  n.addEventListener('click', () => showSection(n.dataset.section)));
+
+// ══ Helpers ══════════════════════════════════════════
+const $ = id => document.getElementById(id);
+function set(id, v) { const el = $(id); if (el) el.textContent = v ?? '—'; }
+function fmt(n) { return (n == null) ? '—' : Number(n).toLocaleString(); }
+function esc(s) {
+  if (s == null) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+function fmtDate(s) {
+  if (!s) return '—';
+  const d = new Date(s);
+  if (isNaN(d)) return s;
+  return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'})
+       + ' ' + d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+}
+function showBanner(id, type, html) {
+  const el = $(id);
+  el.className = `banner banner-${type} show`;
+  el.innerHTML = html;
+}
+
+// ══ Refresh ════════════════════════════════════════
 async function refreshAll() {
-    try {
-        await Promise.all([
-            fetchStats(), fetchSources(), fetchData(docPage), fetchTrends(),
-            fetchDistribution(), fetchQA(qaPage), fetchQAStats(), fetchRounds(),
-            fetchSystem(),
-        ]);
-        document.getElementById('lastUpdate').textContent =
-            'Updated ' + new Date().toLocaleTimeString();
-    } catch (e) { console.error(e); }
+  await Promise.allSettled([
+    fetchStats(), fetchSources(), fetchDocs(docPage),
+    fetchTrends(), fetchDistribution(), fetchQA(qaPage),
+    fetchQAStats(), fetchRounds(), fetchSystem(),
+    fetchScrapeStatus(), fetchQALoopStatus(),
+  ]);
+  if ($('logsAutoRefresh')?.checked) fetchLogs();
+  $('lastUpdate').textContent = 'Updated ' + new Date().toLocaleTimeString();
 }
 
+// ══ Stats ══════════════════════════════════════════
 async function fetchStats() {
-    const s = await (await fetch('/api/stats')).json();
-    set('totalDocs', fmt(s.total_documents));
-    set('uniqueDocs', fmt(s.unique_documents));
-    set('duplicateDocs', fmt(s.duplicate_documents));
-    set('totalQA', fmt(s.total_qa_pairs));
-    set('pendingQA', fmt(s.pending_qa_documents));
-    set('activeSources', s.active_sources || 0);
-    set('totalSources', s.total_sources || 0);
-    set('diskUsage', (s.disk_usage_percent || 0).toFixed(1));
-    set('diskFree', (s.disk_free_gb || 0).toFixed(1));
-    set('lastRound', s.last_round || 0);
+  try {
+    const s = await fetch('/api/stats').then(r => r.json());
+    set('totalDocs',      fmt(s.total_documents));
+    set('uniqueDocs',     fmt(s.unique_documents));
+    set('duplicateDocs',  fmt(s.duplicate_documents));
+    set('totalQA',        fmt(s.total_qa_pairs));
+    set('pendingQA',      fmt(s.pending_qa_documents));
+    set('activeSources',  s.active_sources || 0);
+    set('totalSources',   s.total_sources  || 0);
+    set('diskUsage',      (s.disk_usage_percent || 0).toFixed(1));
+    set('diskFree',       (s.disk_free_gb || 0).toFixed(1));
+    $('lastRoundBadge').textContent = `Round ${s.last_round || 0}`;
+
+    // pipelinePill reflects whether any process is active (updated by fetchScrapeStatus/fetchQALoopStatus)
+  } catch(e) { console.error(e); }
 }
 
+// ══ Sources ════════════════════════════════════════
 async function fetchSources() {
-    const sources = await (await fetch('/api/sources')).json();
-    const tbody = document.getElementById('sourcesTable');
-    if (!sources.length) { tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No sources</td></tr>'; return; }
-    tbody.innerHTML = sources.map(s => `
-        <tr>
-            <td><strong>${esc(s.name)}</strong>
-                ${s.in_config ? '' : '<span class="badge badge-soft ms-1">orphan</span>'}</td>
-            <td><span class="badge badge-soft">${esc(s.type || '—')}</span></td>
-            <td><span class="status-dot status-${s.status}"></span>${s.status}</td>
-            <td class="text-end">${fmt(s.total_items)}</td>
-            <td class="text-end text-success">${fmt(s.unique_items)}</td>
-            <td class="text-end">${fmt(s.qa_pairs)}</td>
-            <td><small>${formatDate(s.last_scrape)}</small></td>
-        </tr>`).join('');
-    document.getElementById('sourceCount').textContent = sources.length;
+  try {
+    const rows = await fetch('/api/sources').then(r => r.json());
+    const tbody = $('sourcesBody');
+    if (!Array.isArray(rows) || !rows.length) {
+      tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><i class="bi bi-inbox"></i>No sources</div></td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(s => `
+      <tr>
+        <td>
+          <strong>${esc(s.name)}</strong>
+          ${!s.in_config ? '<span class="badge badge-red" style="margin-left:6px;">orphan</span>' : ''}
+        </td>
+        <td><span class="badge badge-default">${esc(s.type||'—')}</span></td>
+        <td>
+          <div style="display:flex;align-items:center;gap:7px;">
+            <button class="toggle-btn ${s.enabled ? 'on' : 'off'}"
+                    onclick="toggleSource('${esc(s.name)}', ${!s.enabled})"
+                    title="${s.enabled ? 'Click to disable' : 'Click to enable'}">
+              <span class="toggle-dot"></span>
+            </button>
+            <span style="font-size:11px;color:${s.enabled ? 'var(--green)' : '#f87171'};">
+              ${s.enabled ? 'on' : 'off'}
+            </span>
+          </div>
+        </td>
+        <td>
+          <span class="interval-cell badge badge-default"
+                ondblclick="editInterval(this, '${esc(s.name)}', ${s.scrape_interval_hours || 12})"
+                title="Double-click to edit">
+            ${s.scrape_interval_hours || '—'}h
+            <i class="bi bi-pencil" style="font-size:8px;opacity:0.35;"></i>
+          </span>
+        </td>
+        <td class="r">${fmt(s.total_items)}</td>
+        <td class="r" style="color:var(--green);">${fmt(s.unique_items)}</td>
+        <td class="r">${fmt(s.qa_pairs)}</td>
+        <td style="font-size:11px;color:var(--text-3);">${fmtDate(s.last_scrape)}</td>
+      </tr>`).join('');
 
-    // Update filter selects
+    $('sourceCountBadge').textContent = rows.length + ' sources';
+
     const opts = '<option value="">All sources</option>' +
-        sources.map(s => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join('');
-    syncSelect('docSourceFilter', opts);
-    syncSelect('qaSourceFilter', opts);
+      rows.map(s => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join('');
+    syncSel('docSourceFilter', opts);
+    syncSel('qaSourceFilter',  opts);
+  } catch(e) { console.error(e); }
 }
 
-async function fetchData(page = 1) {
-    docPage = page;
-    const src = document.getElementById('docSourceFilter').value;
-    const hasQA = document.getElementById('docHasQA').value;
-    const search = document.getElementById('docSearch').value;
-    let url = `/api/data?page=${page}&per_page=25`;
-    if (src) url += `&source=${encodeURIComponent(src)}`;
-    if (hasQA) url += `&has_qa=${hasQA}`;
-    if (search) url += `&search=${encodeURIComponent(search)}`;
+async function toggleSource(name, enabled) {
+  try {
+    const r = await fetch(`/api/sources/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    const d = await r.json();
+    if (!d.ok) { alert('Failed: ' + (d.error || 'unknown error')); return; }
+    await fetchSources();
+  } catch(e) { console.error(e); }
+}
 
-    const data = await (await fetch(url)).json();
-    const tbody = document.getElementById('dataTable');
-    if (!data.items || !data.items.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No documents</td></tr>';
-        document.getElementById('docShowing').textContent = '0';
-        document.getElementById('docTotal').textContent = '0';
-        document.getElementById('docPagination').innerHTML = '';
-        return;
+function editInterval(el, name, current) {
+  const inp = document.createElement('input');
+  inp.type = 'number'; inp.value = current; inp.min = 1; inp.max = 8760;
+  inp.style.cssText = 'width:65px;background:var(--bg2);border:1px solid var(--amber);color:var(--text);padding:2px 6px;font-size:11px;border-radius:3px;outline:none;';
+  el.replaceChildren(inp);
+  inp.focus(); inp.select();
+
+  const save = async () => {
+    const val = parseInt(inp.value, 10);
+    if (isNaN(val) || val < 1 || val > 8760) { fetchSources(); return; }
+    try {
+      const r = await fetch(`/api/sources/${encodeURIComponent(name)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scrape_interval_hours: val }),
+      });
+      const d = await r.json();
+      if (!d.ok) alert('Failed: ' + (d.error || 'unknown error'));
+    } catch(e) { console.error(e); }
+    await fetchSources();
+  };
+
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  { e.preventDefault(); save(); }
+    if (e.key === 'Escape') fetchSources();
+  });
+  inp.addEventListener('blur', save);
+}
+
+// ══ Documents ══════════════════════════════════════
+async function fetchDocs(page = 1) {
+  docPage = page;
+  const src    = $('docSourceFilter')?.value;
+  const hasQA  = $('docHasQA')?.value;
+  const search = $('docSearch')?.value;
+  let url = `/api/data?page=${page}&per_page=25`;
+  if (src)    url += `&source=${encodeURIComponent(src)}`;
+  if (hasQA)  url += `&has_qa=${hasQA}`;
+  if (search) url += `&search=${encodeURIComponent(search)}`;
+
+  try {
+    const data = await fetch(url).then(r => r.json());
+    const tbody = $('docsBody');
+    if (!data.items?.length) {
+      tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><i class="bi bi-inbox"></i>No documents</div></td></tr>';
+      set('docShowing', 0); set('docTotal', 0);
+      $('docPager').innerHTML = '';
+      return;
     }
     tbody.innerHTML = data.items.map(it => `
-        <tr class="clickable-row" onclick="showDocModal('${it.id}')">
-            <td class="text-truncate" style="max-width: 360px;" title="${esc(it.title || '')}">
-                ${esc(it.title || '(untitled)')}
-                ${it.is_duplicate ? '<span class="badge bg-warning text-dark ms-1">dup</span>' : ''}
-            </td>
-            <td><small>${esc(it.source_name)}</small></td>
-            <td><span class="badge badge-soft">${esc(it.pipeline_stage)}</span></td>
-            <td class="text-end">${fmt(it.word_count || it.content_length || 0)}</td>
-            <td class="text-end">${it.qa_count > 0 ? `<span class="badge bg-success">${it.qa_count}</span>` : '<span class="text-muted">0</span>'}</td>
-            <td><small>${formatDate(it.date_scraped)}</small></td>
-        </tr>`).join('');
-    document.getElementById('docShowing').textContent = data.items.length;
-    document.getElementById('docTotal').textContent = fmt(data.total);
-    renderPagination('docPagination', data.page, data.total_pages, p => fetchData(p));
+      <tr class="clickable" onclick="openDrawer('${esc(it.id)}')">
+        <td class="max-w-sm truncate" title="${esc(it.title||'')}">
+          <strong>${esc(it.title||'(untitled)')}</strong>
+          ${it.is_duplicate ? '<span class="badge badge-red" style="margin-left:5px;">dup</span>' : ''}
+        </td>
+        <td style="font-size:11px;"><span class="badge badge-default">${esc(it.source_name)}</span></td>
+        <td><span class="badge badge-default">${esc(it.pipeline_stage||'—')}</span></td>
+        <td class="r" style="font-family:var(--mono);">${fmt(it.word_count||0)}</td>
+        <td class="r">${it.qa_count > 0
+          ? `<span class="badge badge-green">${it.qa_count}</span>`
+          : '<span style="color:var(--text-3);">0</span>'}</td>
+        <td style="font-size:11px;color:var(--text-3);">${fmtDate(it.date_scraped)}</td>
+      </tr>`).join('');
+
+    set('docShowing', data.items.length);
+    set('docTotal',   fmt(data.total));
+    renderPager('docPager', page, data.total_pages, fetchDocs);
+  } catch(e) { console.error(e); }
 }
 
+// ══ Q/A List ════════════════════════════════════════
 async function fetchQA(page = 1) {
-    qaPage = page;
-    const src = document.getElementById('qaSourceFilter').value;
-    const search = document.getElementById('qaSearch').value;
-    let url = `/api/qa?page=${page}&per_page=20`;
-    if (src) url += `&source=${encodeURIComponent(src)}`;
-    if (search) url += `&search=${encodeURIComponent(search)}`;
-    const data = await (await fetch(url)).json();
-    const list = document.getElementById('qaList');
-    if (!data.items || !data.items.length) {
-        list.innerHTML = '<div class="text-center text-muted py-4">No Q/A pairs yet. Run Generate to create some.</div>';
-        document.getElementById('qaShowing').textContent = '0';
-        document.getElementById('qaTotalCount').textContent = '0';
-        document.getElementById('qaPagination').innerHTML = '';
-        return;
+  qaPage = page;
+  const src    = $('qaSourceFilter')?.value;
+  const search = $('qaSearch')?.value;
+  let url = `/api/qa?page=${page}&per_page=20`;
+  if (src)    url += `&source=${encodeURIComponent(src)}`;
+  if (search) url += `&search=${encodeURIComponent(search)}`;
+
+  try {
+    const data = await fetch(url).then(r => r.json());
+    const list = $('qaList');
+    if (!data.items?.length) {
+      list.innerHTML = '<div class="empty-state"><i class="bi bi-inbox"></i>No Q/A pairs yet.</div>';
+      set('qaShowing', 0); set('qaTotalCount', 0);
+      $('qaPager').innerHTML = '';
+      return;
     }
     list.innerHTML = data.items.map(qa => `
-        <div class="qa-card">
-            <div class="q"><i class="bi bi-question-circle me-1"></i>${esc(qa.question)}</div>
-            <div class="a">${esc(qa.answer)}</div>
-            <div class="meta">
-                <span class="badge badge-soft">${esc(qa.source_name)}</span>
-                ${qa.car_brand ? `<span class="badge badge-soft">${esc(qa.car_brand)} ${esc(qa.car_year || '')}</span>` : ''}
-                ${qa.llm_model ? `<span class="badge badge-soft">${esc(qa.llm_model)}</span>` : ''}
-                <span class="ms-2">${formatDate(qa.date_generated)}</span>
-                ${qa.document_id ? `<a href="#" class="ms-2" onclick="showDocModal('${qa.document_id}'); return false;">view doc →</a>` : ''}
-            </div>
-        </div>`).join('');
-    document.getElementById('qaShowing').textContent = data.items.length;
-    document.getElementById('qaTotalCount').textContent = fmt(data.total);
-    renderPagination('qaPagination', data.page, data.total_pages, p => fetchQA(p));
+      <div class="qa-card">
+        <div class="qa-q">${esc(qa.question)}</div>
+        <div class="qa-a">${esc(qa.answer)}</div>
+        <div class="qa-meta">
+          <span class="badge badge-default">${esc(qa.source_name)}</span>
+          ${qa.car_brand ? `<span class="badge badge-amber">${esc(qa.car_brand)} ${esc(qa.car_year||'')}</span>` : ''}
+          ${qa.llm_model ? `<span class="badge badge-default">${esc(qa.llm_model)}</span>` : ''}
+          <span style="font-size:10px;color:var(--text-3);margin-left:auto;">${fmtDate(qa.date_generated)}</span>
+          ${qa.document_id ? `<a href="#" onclick="openDrawer('${qa.document_id}');return false;" style="font-size:10px;margin-left:6px;">view doc →</a>` : ''}
+        </div>
+      </div>`).join('');
+
+    set('qaShowing',    data.items.length);
+    set('qaTotalCount', fmt(data.total));
+    renderPager('qaPager', page, data.total_pages, fetchQA);
+  } catch(e) { console.error(e); }
 }
 
 async function fetchQAStats() {
-    const s = await (await fetch('/api/qa/stats')).json();
-    set('qaTotal', fmt(s.total || 0));
-    set('qaAvgQ', s.avg_question_length || 0);
-    set('qaAvgA', s.avg_answer_length || 0);
-    set('qaAvgQuality', (s.avg_quality_score || 0).toFixed(2));
+  try {
+    const s = await fetch('/api/qa/stats').then(r => r.json());
+    if (s.error) return;
+    set('qaTotal',       fmt(s.total || 0));
+    set('qaPendingDocs', fmt(s.pending_documents || 0));
+    set('qaAvgQ',        s.avg_question_length || 0);
+    set('qaAvgQuality',  (+(s.avg_quality_score || 0)).toFixed(2));
+  } catch(e) {}
 }
 
+// ══ Charts ══════════════════════════════════════════
 async function fetchTrends() {
-    const t = await (await fetch('/api/trends?days=14')).json();
-    const ctx = document.getElementById('trendsChart').getContext('2d');
+  try {
+    const t = await fetch('/api/trends?days=14').then(r => r.json());
+    const ctx = $('trendsChart').getContext('2d');
     if (trendsChart) trendsChart.destroy();
     trendsChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: t.labels,
-            datasets: [
-                { label: 'Scraped',  data: t.scraped,      borderColor: '#0d6efd', backgroundColor: 'rgba(13,110,253,.1)', fill: true, tension: .3 },
-                { label: 'Q/A',      data: t.qa_generated, borderColor: '#198754', backgroundColor: 'rgba(25,135,84,.1)',  fill: true, tension: .3 },
-                { label: 'Duplicate',data: t.duplicates,   borderColor: '#dc3545', backgroundColor: 'rgba(220,53,69,.08)', fill: true, tension: .3 },
-            ]
-        },
-        options: { responsive: true, maintainAspectRatio: false,
-                   scales: { y: { beginAtZero: true } } }
+      type: 'line',
+      data: {
+        labels: t.labels,
+        datasets: [
+          { label:'Scraped',   data:t.scraped,       borderColor:'#f59e0b', backgroundColor:'rgba(245,158,11,0.08)', fill:true, tension:0.3, pointRadius:2 },
+          { label:'Q/A',       data:t.qa_generated,  borderColor:'#22c55e', backgroundColor:'rgba(34,197,94,0.08)',  fill:true, tension:0.3, pointRadius:2 },
+          { label:'Duplicate', data:t.duplicates,    borderColor:'#ef4444', backgroundColor:'rgba(239,68,68,0.06)',  fill:true, tension:0.3, pointRadius:2 },
+        ]
+      },
+      options: {
+        responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{ labels:{ color:'#8892a4', boxWidth:10, font:{size:10} } } },
+        scales:{
+          x:{ ticks:{ color:'#4b5568', font:{size:9} }, grid:{ color:'rgba(255,255,255,0.04)' } },
+          y:{ beginAtZero:true, ticks:{ color:'#4b5568', font:{size:9} }, grid:{ color:'rgba(255,255,255,0.06)' } }
+        }
+      }
     });
+  } catch(e) {}
 }
 
 async function fetchDistribution() {
-    const d = await (await fetch('/api/source-distribution')).json();
-    const ctx = document.getElementById('distributionChart').getContext('2d');
-    if (distributionChart) distributionChart.destroy();
-    if (!d.labels || !d.labels.length) return;
-    distributionChart = new Chart(ctx, {
-        type: 'doughnut',
-        data: { labels: d.labels, datasets: [{ data: d.values,
-            backgroundColor: ['#0d6efd','#198754','#ffc107','#dc3545','#6f42c1','#0dcaf0','#fd7e14','#20c997','#6c757d','#d63384','#adb5bd','#495057','#212529'] }] },
-        options: { responsive: true, maintainAspectRatio: false,
-                   plugins: { legend: { position: 'right', labels: { boxWidth: 10, font: {size: 11} } } } }
+  try {
+    const d = await fetch('/api/source-distribution').then(r => r.json());
+    const ctx = $('distributionChart').getContext('2d');
+    if (distChart) distChart.destroy();
+    if (!d.labels?.length) return;
+    const COLORS = ['#f59e0b','#3b82f6','#22c55e','#ec4899','#8b5cf6','#06b6d4','#f97316','#84cc16','#6366f1','#14b8a6','#ef4444','#a855f7','#64748b'];
+    distChart = new Chart(ctx, {
+      type:'doughnut',
+      data:{ labels:d.labels, datasets:[{ data:d.values, backgroundColor:COLORS.slice(0,d.labels.length), borderWidth:1, borderColor:'#0d1220' }] },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{
+          legend:{ position:'right', labels:{ color:'#8892a4', boxWidth:8, font:{size:9}, padding:8 } }
+        },
+        cutout:'65%'
+      }
     });
+  } catch(e) {}
+}
+
+// ══ Rounds ══════════════════════════════════════════
+function _roundStatusCls(s) {
+  if (s === 'completed')   return { cls: 'round-status-completed',   dot: 'dot-green',  icon: 'bi-check-circle' };
+  if (s === 'running')     return { cls: 'round-status-running',     dot: 'dot-amber',  icon: 'bi-arrow-repeat' };
+  if (s === 'interrupted') return { cls: 'round-status-interrupted', dot: 'dot-gray',   icon: 'bi-slash-circle' };
+  return                          { cls: 'round-status-failed',      dot: 'dot-red',    icon: 'bi-x-circle' };
 }
 
 async function fetchRounds() {
-    const rounds = await (await fetch('/api/rounds?limit=20')).json();
-    const tbody = document.getElementById('roundsTable');
-    if (!rounds.length) { tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No rounds yet</td></tr>'; return; }
-    tbody.innerHTML = rounds.map(r => `
-        <tr>
-            <td><strong>#${r.round_number}</strong></td>
-            <td><span class="status-dot status-${r.status === 'running' ? 'running' : (r.status === 'completed' ? 'active' : 'error')}"></span>${esc(r.status)}</td>
-            <td><small>${formatDate(r.start_time)}</small></td>
-            <td><small>${formatDate(r.end_time)}</small></td>
-            <td class="text-end">${fmt(r.total_items_scraped || 0)}</td>
-            <td class="text-end">${fmt(r.total_items_stored || 0)}</td>
-            <td class="text-end">${fmt(r.total_duplicates_found || 0)}</td>
-            <td class="text-end">${fmt(r.total_qa_generated || 0)}</td>
-            <td class="text-end ${r.errors_count > 0 ? 'text-danger' : ''}">${fmt(r.errors_count || 0)}</td>
-        </tr>`).join('');
+  try {
+    const rows = await fetch('/api/rounds?limit=20').then(r => r.json());
+    const tbody = $('roundsBody');
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><i class="bi bi-inbox"></i>No rounds</div></td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(r => {
+      const { cls, dot, icon } = _roundStatusCls(r.status);
+      const noEnd = r.status === 'running' || r.status === 'interrupted';
+      return `<tr>
+        <td><strong>#${r.round_number}</strong></td>
+        <td class="${cls}">
+          <span class="status-dot ${dot}"></span>${esc(r.status)}
+          ${r.status === 'running' && !r.end_time
+            ? '<span class="badge badge-amber" style="margin-left:6px;font-size:9px;">stale?</span>'
+            : ''}
+        </td>
+        <td style="font-size:11px;color:var(--text-3);">${fmtDate(r.start_time)}</td>
+        <td style="font-size:11px;color:${noEnd ? 'var(--text-3)' : 'var(--text-2)'};">
+          ${r.end_time ? fmtDate(r.end_time) : '<span style="color:var(--text-3);">—</span>'}
+        </td>
+        <td class="r">${fmt(r.total_items_scraped||0)}</td>
+        <td class="r">${fmt(r.total_items_stored||0)}</td>
+        <td class="r">${fmt(r.total_duplicates_found||0)}</td>
+        <td class="r">${fmt(r.total_qa_generated||0)}</td>
+        <td class="r" style="${(r.errors_count||0)>0?'color:var(--red);':''}">${fmt(r.errors_count||0)}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {}
 }
 
+async function cleanupRounds() {
+  try {
+    const r = await fetch('/api/rounds/cleanup', { method: 'POST' });
+    const d = await r.json();
+    showBanner('roundsCleanupBanner',
+      d.ok ? (d.cleaned > 0 ? 'success' : 'info') : 'error',
+      d.ok ? `<i class="bi bi-check-circle"></i> ${d.message}` : d.error);
+    if (d.ok && d.cleaned > 0) await fetchRounds();
+  } catch(e) { showBanner('roundsCleanupBanner', 'error', e.message); }
+}
+
+// ══ System ══════════════════════════════════════════
 async function fetchSystem() {
-    const s = await (await fetch('/api/system/status')).json();
-    pill('pgPill', s.postgres, 'Postgres');
-    pill('redisPill', s.redis, 'Redis');
-    pill('ollamaPill', s.ollama, 'Ollama');
-
+  try {
+    const s = await fetch('/api/system/status').then(r => r.json());
     const d = s.details || {};
-    document.getElementById('sysPg').innerHTML = s.postgres
-        ? `<div>Status: <strong class="text-success">connected</strong></div>
-           <div>DB size: <code>${esc(d.pg_size || '—')}</code></div>`
-        : `<div class="text-danger">Not connected</div><small>${esc(d.postgres_error || '')}</small>`;
 
-    document.getElementById('sysRedis').innerHTML = s.redis
-        ? `<div>Status: <strong class="text-success">connected</strong></div>
-           <div>Version: <code>${esc(d.redis_version || '—')}</code></div>
-           <div>Memory: <code>${esc(d.redis_memory || '—')}</code></div>
-           <div>Clients: <code>${esc(d.redis_clients || '—')}</code></div>`
-        : `<div class="text-warning">Not connected</div><small>${esc(d.redis_error || '')}</small>`;
+    updateTopPill('pgPill',     s.postgres, 'Postgres');
+    updateTopPill('redisPill',  s.redis,    'Redis');
+    updateTopPill('ollamaPill', s.ollama,   'Ollama');
 
-    document.getElementById('sysOllama').innerHTML = s.ollama
-        ? `<div>Status: <strong class="text-success">available</strong></div>
-           <div>URL: <code>${esc(d.ollama_url || '')}</code></div>
-           <div class="mt-1"><small>Models:</small><div class="ollama-models">${(d.ollama_models||[]).map(m=>esc(m)).join('<br>') || '<em class="text-muted">none</em>'}</div></div>`
-        : `<div class="text-warning">Not reachable at <code>${esc(d.ollama_url || '')}</code></div><small>${esc(d.ollama_error || '')}</small>`;
+    $('pgStatus').className    = 'badge ' + (s.postgres ? 'badge-green' : 'badge-red');
+    $('pgStatus').textContent  = s.postgres ? 'connected' : 'offline';
+    $('pgDetails').innerHTML   = s.postgres
+      ? `<div class="sys-row"><span class="key">Status</span><span class="val" style="color:var(--green);">Connected</span></div>
+         <div class="sys-row"><span class="key">DB Size</span><span class="val"><code>${esc(d.pg_size||'—')}</code></span></div>`
+      : `<div class="sys-row"><span class="key">Error</span><span class="val" style="color:var(--red);">${esc(d.postgres_error||'Not connected')}</span></div>`;
+
+    $('redisStatus').className  = 'badge ' + (s.redis ? 'badge-green' : 'badge-red');
+    $('redisStatus').textContent = s.redis ? 'connected' : 'offline';
+    $('redisDetails').innerHTML = s.redis
+      ? `<div class="sys-row"><span class="key">Status</span><span class="val" style="color:var(--green);">Connected</span></div>
+         <div class="sys-row"><span class="key">Version</span><span class="val"><code>${esc(d.redis_version||'—')}</code></span></div>
+         <div class="sys-row"><span class="key">Memory</span><span class="val"><code>${esc(d.redis_memory||'—')}</code></span></div>
+         <div class="sys-row"><span class="key">Clients</span><span class="val"><code>${esc(d.redis_clients||'—')}</code></span></div>`
+      : `<div class="sys-row"><span class="key">Error</span><span class="val" style="color:var(--red);">${esc(d.redis_error||'Not connected')}</span></div>`;
+
+    $('ollamaStatus').className  = 'badge ' + (s.ollama ? 'badge-green' : 'badge-red');
+    $('ollamaStatus').textContent = s.ollama ? 'available' : 'offline';
+    $('ollamaDetails').innerHTML = s.ollama
+      ? `<div class="sys-row"><span class="key">Status</span><span class="val" style="color:var(--green);">Available</span></div>
+         <div class="sys-row"><span class="key">URL</span><span class="val"><code>${esc(d.ollama_url||'—')}</code></span></div>
+         <div class="sys-row"><span class="key">Models</span><span class="val">${(d.ollama_models||[]).map(m=>`<code>${esc(m)}</code>`).join(' ') || '—'}</span></div>`
+      : `<div class="sys-row"><span class="key">URL</span><span class="val"><code>${esc(d.ollama_url||'—')}</code></span></div>
+         <div class="sys-row"><span class="key">Error</span><span class="val" style="color:var(--red);">${esc(d.ollama_error||'Not reachable')}</span></div>`;
+  } catch(e) {}
 }
 
-async function showDocModal(docId) {
-    const it = await (await fetch(`/api/data/${docId}`)).json();
+function updateTopPill(id, ok, label) {
+  const el = $(id);
+  el.className = 'pill ' + (ok ? 'ok' : 'bad');
+  el.innerHTML = `<span class="dot"></span>${label}`;
+}
+
+// ══ Scrape Loop ═════════════════════════════════════
+async function fetchScrapeStatus() {
+  try {
+    const s = await fetch('/api/scrape/status').then(r => r.json());
+    const dot   = $('scrapeDot');
+    const label = $('scrapeLabel');
+    const meta  = $('scrapeMeta');
+    const pill  = $('scrapePill');
+    const pp    = $('pipelinePill');
+    const startBtn = $('scrapeStartBtn');
+    const stopBtn  = $('scrapeStopBtn');
+    const topStop  = $('topbarStopScrape');
+
+    if (s.running) {
+      dot.className = 'status-dot dot-amber';
+      label.textContent = `Running  PID ${s.pid}`;
+      meta.textContent  = `started ${fmtDate(s.started_at)}`;
+      pill.className = 'pill ok running';
+      pill.innerHTML = `<span class="dot"></span>Running`;
+      if (pp) { pp.className = 'pill ok running'; pp.innerHTML = `<span class="dot"></span>Scraping`; }
+      startBtn.disabled = true; stopBtn.disabled = false;
+      if (topStop) topStop.classList.add('show');
+    } else {
+      dot.className = 'status-dot dot-gray';
+      label.textContent = 'Stopped';
+      meta.textContent  = 'Fetches & stores documents from all sources';
+      pill.className = 'pill bad';
+      pill.innerHTML = `<span class="dot"></span>Idle`;
+      startBtn.disabled = false; stopBtn.disabled = true;
+      if (topStop) topStop.classList.remove('show');
+    }
+  } catch(e) {}
+}
+
+async function scrapeStart() {
+  try {
+    const r = await fetch('/api/scrape/start', { method: 'POST' });
+    const d = await r.json();
+    showBanner('scrapeBanner', d.ok ? 'success' : 'warn', d.message || d.error || '');
+    setTimeout(fetchScrapeStatus, 600);
+    setTimeout(fetchLogs, 1200);
+  } catch(e) { showBanner('scrapeBanner', 'error', e.message); }
+}
+
+async function scrapeStop() {
+  if (!confirm('Stop the scrape loop? Current round will be interrupted.')) return;
+  try {
+    const r = await fetch('/api/scrape/stop', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ grace_seconds: 15 })
+    });
+    const d = await r.json();
+    showBanner('scrapeBanner', d.ok ? 'success' : 'warn', d.message || d.error || '');
+    setTimeout(fetchScrapeStatus, 400);
+  } catch(e) { showBanner('scrapeBanner', 'error', e.message); }
+}
+
+// ══ Q/A Loop ════════════════════════════════════════
+async function fetchQALoopStatus() {
+  try {
+    const s = await fetch('/api/qa-loop/status').then(r => r.json());
+    const dot   = $('qaLoopDot');
+    const label = $('qaLoopLabel');
+    const meta  = $('qaLoopMeta');
+    const pill  = $('qaLoopPill');
+    const startBtn = $('qaLoopStartBtn');
+    const stopBtn  = $('qaLoopStopBtn');
+    const topStop  = $('topbarStopQA');
+
+    // Also update Q/A section pill if present
+    const qaSectionPill = $('qaPipelineStatusPill');
+
+    if (s.running) {
+      dot.className = 'status-dot dot-amber';
+      label.textContent = `Running  PID ${s.pid}`;
+      meta.textContent  = `started ${fmtDate(s.started_at)}`;
+      pill.className = 'pill ok running';
+      pill.innerHTML = `<span class="dot"></span>Running`;
+      if (qaSectionPill) { qaSectionPill.className = 'pill ok running'; qaSectionPill.innerHTML = `<span class="dot"></span>Running PID ${s.pid}`; }
+      startBtn.disabled = true; stopBtn.disabled = false;
+      if (topStop) topStop.classList.add('show');
+    } else {
+      dot.className = 'status-dot dot-gray';
+      label.textContent = 'Stopped';
+      meta.textContent  = 'Generates Q/A pairs via Ollama continuously';
+      pill.className = 'pill bad';
+      pill.innerHTML = `<span class="dot"></span>Idle`;
+      if (qaSectionPill) { qaSectionPill.className = 'pill bad'; qaSectionPill.innerHTML = `<span class="dot"></span>Idle`; }
+      startBtn.disabled = false; stopBtn.disabled = true;
+      if (topStop) topStop.classList.remove('show');
+    }
+  } catch(e) {}
+}
+
+async function qaLoopStart() {
+  try {
+    const r = await fetch('/api/qa-loop/start', { method: 'POST' });
+    const d = await r.json();
+    showBanner('qaLoopBanner', d.ok ? 'success' : 'warn', d.message || d.error || '');
+    setTimeout(fetchQALoopStatus, 600);
+  } catch(e) { showBanner('qaLoopBanner', 'error', e.message); }
+}
+
+async function qaLoopStop() {
+  try {
+    const r = await fetch('/api/qa-loop/stop', { method: 'POST' });
+    const d = await r.json();
+    showBanner('qaLoopBanner', d.ok ? 'success' : 'warn', d.message || d.error || '');
+    setTimeout(fetchQALoopStatus, 400);
+  } catch(e) { showBanner('qaLoopBanner', 'error', e.message); }
+}
+
+async function fetchLogs() {
+  const lines = $('logsLineCount')?.value || 200;
+  const src   = $('logsSource')?.value || 'scrape';
+  const apiUrl = src === 'qa-loop' ? `/api/qa-loop/logs?lines=${lines}` : `/api/scrape/logs?lines=${lines}`;
+  try {
+    const d = await fetch(apiUrl).then(r => r.json());
+    const pre = $('pipelineLogs');
+    if (!d.exists) { pre.textContent = '(log file not yet created)'; return; }
+    const stick = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 40;
+    pre.textContent = (d.lines||[]).join('\n') || '(empty)';
+    if (stick || $('logsAutoRefresh')?.checked) pre.scrollTop = pre.scrollHeight;
+    if (d.log_file) $('logFilePath').textContent = d.log_file;
+  } catch(e) {}
+}
+
+async function exportQA() {
+  const fmt = $('exportFormat').value;
+  try {
+    const r = await fetch('/api/pipeline/export-qa', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ format: fmt })
+    });
+    const d = await r.json();
+    showBanner('exportBanner', d.ok ? 'success' : 'warn',
+      d.ok ? `${d.message}<br><code>${esc(d.output_path)}</code>` : (d.error||'Failed'));
+  } catch(e) { showBanner('exportBanner', 'error', e.message); }
+}
+
+// ══ Q/A Generation ══════════════════════════════════
+async function triggerQA() {
+  const batchSize = parseInt($('qaBatchSize')?.value || '5', 10);
+  const btn = $('qaGenerateBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Starting…';
+  const banner = $('qaJobBanner');
+  try {
+    const r = await fetch('/api/qa/generate', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ batch_size: batchSize })
+    });
+    const d = await r.json();
+    if (!d.ok) {
+      showBanner('qaJobBanner', 'warn', d.error || 'Failed to start');
+    } else {
+      showBanner('qaJobBanner', 'info', `<i class="bi bi-arrow-repeat"></i> Generating Q/A (batch ${batchSize})…`);
+      startQAPoll();
+    }
+  } catch(e) {
+    showBanner('qaJobBanner', 'error', 'Error: ' + e.message);
+  } finally {
+    setTimeout(() => {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-play-fill"></i> Generate';
+    }, 1500);
+  }
+}
+
+function startQAPoll() {
+  if (qaPollTimer) clearInterval(qaPollTimer);
+  qaPollTimer = setInterval(async () => {
+    try {
+      const s = await fetch('/api/qa/generate/status').then(r => r.json());
+      if (!s.running) {
+        clearInterval(qaPollTimer); qaPollTimer = null;
+        const res = s.last_result;
+        if (res?.ok) {
+          showBanner('qaJobBanner', 'success',
+            `<i class="bi bi-check-circle"></i> Done — ${res.stats?.qa_generated||0} pairs from ${res.stats?.processed||0} doc(s).`);
+        } else if (res) {
+          showBanner('qaJobBanner', 'error', 'Failed: ' + (res.error||'unknown'));
+        }
+        await Promise.allSettled([fetchQA(1), fetchQAStats(), fetchStats()]);
+      }
+    } catch(e) {}
+  }, 3000);
+}
+
+// ══ Drawer ══════════════════════════════════════════
+async function openDrawer(docId) {
+  try {
+    const it = await fetch(`/api/data/${docId}`).then(r => r.json());
     if (it.error) return;
-    document.getElementById('docModalTitle').textContent = it.title || '(untitled)';
-    document.getElementById('docSource').textContent = it.source_name || '—';
-    document.getElementById('docCategory').textContent = it.category || '—';
-    document.getElementById('docAuthor').textContent = it.author || '—';
-    document.getElementById('docStage').textContent = it.pipeline_stage || '—';
-    document.getElementById('docWords').textContent = fmt(it.word_count || 0);
-    document.getElementById('docQACount').textContent = fmt(it.qa_count || 0);
-    document.getElementById('docRound').textContent = it.round_number || '—';
-    document.getElementById('docDate').textContent = formatDate(it.date_scraped);
-    const a = document.getElementById('docUrl');
-    a.textContent = it.page_url || '—'; a.href = it.page_url || '#';
-    document.getElementById('docContent').textContent =
-        (it.content_text || '').slice(0, 8000) + ((it.content_text || '').length > 8000 ? '\n\n…' : '') || '(no content)';
+    $('drawerTitle').textContent = it.title || '(untitled)';
+
+    $('drawerMeta').innerHTML = [
+      { key:'Source',   val: it.source_name   },
+      { key:'Category', val: it.category      },
+      { key:'Stage',    val: it.pipeline_stage },
+      { key:'Author',   val: it.author        },
+      { key:'Words',    val: fmt(it.word_count) },
+      { key:'Q/A',      val: fmt(it.qa_count)  },
+      { key:'Round',    val: it.round_number   },
+      { key:'Date',     val: fmtDate(it.date_scraped) },
+    ].map(m => `
+      <div class="drawer-meta-item">
+        <div class="key">${esc(m.key)}</div>
+        <div class="val">${esc(m.val||'—')}</div>
+      </div>`).join('');
+
+    const content = it.content_text || '';
+    $('drawerContent').textContent =
+      (content.slice(0, 10000) + (content.length > 10000 ? '\n\n…' : '')) || '(no content)';
 
     const qa = it.qa_pairs || [];
-    document.getElementById('docQABadge').textContent = qa.length;
-    document.getElementById('docQAList').innerHTML = qa.length
-        ? qa.map(q => `<div class="qa-card">
-            <div class="q">${esc(q.question)}</div>
-            <div class="a">${esc(q.answer)}</div>
-            <div class="meta">
-                ${q.car_brand ? `<span class="badge badge-soft">${esc(q.car_brand)} ${esc(q.car_year || '')}</span>` : ''}
-                ${q.llm_model ? `<span class="badge badge-soft">${esc(q.llm_model)}</span>` : ''}
-                <span class="ms-2">${formatDate(q.date_generated)}</span>
-            </div></div>`).join('')
-        : '<div class="text-muted text-center py-3">No Q/A pairs for this document yet.</div>';
-    new bootstrap.Modal(document.getElementById('docModal')).show();
+    $('drawerQACount').textContent = qa.length;
+    $('drawerQAList').innerHTML = qa.length
+      ? qa.map(q => `
+          <div class="qa-card" style="margin-bottom:10px;">
+            <div class="qa-q">${esc(q.question)}</div>
+            <div class="qa-a">${esc(q.answer)}</div>
+            <div class="qa-meta">
+              ${q.car_brand ? `<span class="badge badge-amber">${esc(q.car_brand)} ${esc(q.car_year||'')}</span>` : ''}
+              ${q.llm_model ? `<span class="badge badge-default">${esc(q.llm_model)}</span>` : ''}
+            </div>
+          </div>`).join('')
+      : '<div class="empty-state" style="padding:24px 0;"><i class="bi bi-inbox"></i>No Q/A pairs yet.</div>';
+
+    // activate content tab
+    document.querySelectorAll('.dtab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.dtab-pane').forEach(p => p.classList.remove('active'));
+    document.querySelector('.dtab[data-dtab="content"]').classList.add('active');
+    $('dtab-content').classList.add('active');
+
+    $('drawerOverlay').classList.add('open');
+    $('drawer').classList.add('open');
+  } catch(e) { console.error(e); }
 }
 
-async function triggerQAGeneration() {
-    const batchSize = parseInt(document.getElementById('qaBatchSize').value, 10) || 5;
-    const btn = document.getElementById('qaTriggerBtn');
-    btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Starting…';
-    const banner = document.getElementById('qaJobBanner');
-    try {
-        const res = await fetch('/api/qa/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ batch_size: batchSize }),
-        });
-        const data = await res.json();
-        if (!data.ok) {
-            banner.className = 'alert alert-warning mt-3';
-            banner.textContent = data.error || 'Failed to start';
-            banner.classList.remove('d-none');
-        } else {
-            banner.className = 'alert alert-info mt-3';
-            banner.innerHTML = `<i class="bi bi-arrow-repeat"></i> Q/A job running (batch ${batchSize})…`;
-            banner.classList.remove('d-none');
-            startQAJobPolling();
-        }
-    } catch (e) {
-        banner.className = 'alert alert-danger mt-3';
-        banner.textContent = 'Error: ' + e.message;
-        banner.classList.remove('d-none');
-    } finally {
-        setTimeout(() => { btn.disabled = false; btn.innerHTML = '<i class="bi bi-play-fill"></i> Generate'; }, 1500);
-    }
+function closeDrawer() {
+  $('drawerOverlay').classList.remove('open');
+  $('drawer').classList.remove('open');
 }
 
-function startQAJobPolling() {
-    if (qaPollTimer) clearInterval(qaPollTimer);
-    qaPollTimer = setInterval(async () => {
-        const s = await (await fetch('/api/qa/generate/status')).json();
-        const banner = document.getElementById('qaJobBanner');
-        if (!s.running) {
-            clearInterval(qaPollTimer); qaPollTimer = null;
-            const r = s.last_result;
-            if (r && r.ok) {
-                banner.className = 'alert alert-success mt-3';
-                banner.innerHTML = `<i class="bi bi-check-circle"></i> Q/A job finished — generated ${r.stats?.qa_generated || 0} pairs from ${r.stats?.processed || 0} document(s).`;
-            } else if (r) {
-                banner.className = 'alert alert-danger mt-3';
-                banner.textContent = 'Q/A job failed: ' + (r.error || 'unknown');
-            }
-            await Promise.all([fetchQA(1), fetchQAStats(), fetchStats()]);
-        }
-    }, 3000);
+// Drawer tab switching
+document.querySelectorAll('.dtab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const key = tab.dataset.dtab;
+    document.querySelectorAll('.dtab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.dtab-pane').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    $(`dtab-${key}`).classList.add('active');
+  });
+});
+
+// ══ Pagination ══════════════════════════════════════
+function renderPager(elId, page, total, cb) {
+  const el = $(elId);
+  if (!total || total <= 1) { el.innerHTML = ''; return; }
+  let html = `<button class="page-btn" ${page===1?'disabled':''} onclick="(${cb.name})(${Math.max(1,page-1)})">‹</button>`;
+  const from = Math.max(1, page-2), to = Math.min(total, page+2);
+  if (from > 1) html += `<button class="page-btn" onclick="(${cb.name})(1)">1</button>${from>2?'<span style="color:var(--text-3);padding:0 4px;">…</span>':''}`;
+  for (let i = from; i <= to; i++)
+    html += `<button class="page-btn ${i===page?'active':''}" onclick="(${cb.name})(${i})">${i}</button>`;
+  if (to < total) html += `${to<total-1?'<span style="color:var(--text-3);padding:0 4px;">…</span>':''}<button class="page-btn" onclick="(${cb.name})(${total})">${total}</button>`;
+  html += `<button class="page-btn" ${page===total?'disabled':''} onclick="(${cb.name})(${Math.min(total,page+1)})">›</button>`;
+  el.innerHTML = html;
 }
 
-// ----- helpers -----
-function set(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
-function fmt(n) { return (n === undefined || n === null) ? '—' : Number(n).toLocaleString(); }
-function esc(s) { if (s === undefined || s === null) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-function formatDate(s) {
-    if (!s) return '—';
-    const d = new Date(s);
-    if (isNaN(d.getTime())) return s;
-    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+// ══ Q/A Pipeline (subprocess) ════════════════════════
+// Legacy aliases — Q/A section start/stop buttons call these
+async function fetchQAPipelineStatus() { return fetchQALoopStatus(); }
+async function qaPipelineStart() { return qaLoopStart(); }
+async function qaPipelineStop() { return qaLoopStop(); }
+
+// ══ Misc ════════════════════════════════════════════
+function syncSel(id, opts) {
+  const sel = $(id); if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = opts;
+  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
 }
-function pill(id, ok, label) {
-    const el = document.getElementById(id);
-    el.textContent = label + ' ' + (ok ? '✓' : '✗');
-    el.className = 'system-pill ' + (ok ? 'ok' : 'bad');
-}
-function syncSelect(id, opts) {
-    const sel = document.getElementById(id); if (!sel) return;
-    const cur = sel.value;
-    sel.innerHTML = opts;
-    if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
-}
-function renderPagination(elId, page, totalPages, onClick) {
-    const el = document.getElementById(elId);
-    if (!totalPages || totalPages <= 1) { el.innerHTML = ''; return; }
-    let html = `<li class="page-item ${page === 1 ? 'disabled' : ''}"><a class="page-link" href="#">«</a></li>`;
-    for (let i = Math.max(1, page - 2); i <= Math.min(totalPages, page + 2); i++) {
-        html += `<li class="page-item ${i === page ? 'active' : ''}"><a class="page-link" href="#">${i}</a></li>`;
-    }
-    html += `<li class="page-item ${page === totalPages ? 'disabled' : ''}"><a class="page-link" href="#">»</a></li>`;
-    el.innerHTML = html;
-    [...el.querySelectorAll('a.page-link')].forEach((a, idx) => {
-        a.addEventListener('click', e => {
-            e.preventDefault();
-            if (idx === 0) onClick(Math.max(1, page - 1));
-            else if (idx === el.querySelectorAll('a.page-link').length - 1) onClick(Math.min(totalPages, page + 1));
-            else onClick(parseInt(a.textContent, 10));
-        });
-    });
-}
+
+// ══ Boot ════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => {
+  refreshAll();
+  setInterval(refreshAll, REFRESH_MS);
+
+  $('docSearch')?.addEventListener('keydown', e => { if(e.key==='Enter') fetchDocs(1); });
+  $('qaSearch')?.addEventListener('keydown',  e => { if(e.key==='Enter') fetchQA(1); });
+  $('docSourceFilter')?.addEventListener('change', () => fetchDocs(1));
+  $('docHasQA')?.addEventListener('change',       () => fetchDocs(1));
+  $('qaSourceFilter')?.addEventListener('change',  () => fetchQA(1));
+});
 </script>
 </body>
 </html>

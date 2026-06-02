@@ -76,7 +76,7 @@ class RedditAPIScraper(BaseScraper):
         self._reddit = None  # PRAW client, lazily created
 
     # --- Required abstract methods (unused for this scraper) ---
-    async def scrape_listing(self, url: str) -> list[str]:
+    async def scrape_listing(self, url: str, html: Optional[str] = None) -> list[str]:
         return []
 
     async def scrape_item(self, url: str) -> Optional[ScrapedItem]:
@@ -135,7 +135,7 @@ class RedditAPIScraper(BaseScraper):
         }.get(sort, lambda: sub.hot(limit=self.config.max_pages_per_round))
 
         # PRAW is sync; run in a thread so we don't block the event loop
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         submissions = await loop.run_in_executor(None, lambda: list(listing_fn()))
 
         for submission in submissions:

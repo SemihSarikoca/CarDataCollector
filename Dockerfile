@@ -47,12 +47,12 @@ RUN playwright install-deps chromium
 # Application code
 COPY . .
 
-# Data directories
-RUN mkdir -p /data/car-collector/raw/html \
-    /data/car-collector/raw/pdf \
-    /data/car-collector/processed \
-    /data/car-collector/qa_output \
-    /data/car-collector/temp \
+# Data directories (mirrors settings.yaml base_path: "./data" with WORKDIR /app)
+RUN mkdir -p /app/data/raw/html \
+    /app/data/raw/pdf \
+    /app/data/processed \
+    /app/data/qa_output \
+    /app/data/temp \
     /app/logs
 
 # Environment variables
@@ -62,10 +62,10 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # Health check
 HEALTHCHECK --interval=5m --timeout=30s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:5000/health || exit 1
+    CMD curl -f http://localhost:5050/health || exit 1
 
-# Expose dashboard port
-EXPOSE 5000
+# Expose dashboard port (matches settings.yaml dashboard.port: 5050)
+EXPOSE 5050
 
 # Entry point
 ENTRYPOINT ["python", "-m", "src.main"]

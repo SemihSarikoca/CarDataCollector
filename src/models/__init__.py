@@ -6,7 +6,7 @@ Data structures used throughout the pipeline
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
@@ -51,7 +51,7 @@ class ScrapedItem(BaseModel):
     content_text: str = ""
     author: str = ""
     date_published: Optional[datetime] = None
-    date_scraped: datetime = Field(default_factory=datetime.utcnow)
+    date_scraped: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     category: ContentCategory = ContentCategory.ARTICLE
     language: str = "en"
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -100,7 +100,7 @@ class StoredDocument(BaseModel):
     language: str = "en"
     author: str = ""
     date_published: Optional[datetime] = None
-    date_scraped: datetime = Field(default_factory=datetime.utcnow)
+    date_scraped: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     date_processed: Optional[datetime] = None
     pipeline_stage: PipelineStage = PipelineStage.SCRAPED
     is_duplicate: bool = False
@@ -124,7 +124,7 @@ class QAPair(BaseModel):
     car_model: str = ""
     car_year: str = ""
     quality_score: float = 0.0
-    date_generated: datetime = Field(default_factory=datetime.utcnow)
+    date_generated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     model_used: str = ""
     is_verified: bool = False
     metadata_json: str = "{}"
@@ -158,7 +158,7 @@ class SourceConfig(BaseModel):
 class RoundStats(BaseModel):
     """Round statistics"""
     round_number: int
-    start_time: datetime = Field(default_factory=datetime.utcnow)
+    start_time: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     end_time: Optional[datetime] = None
     total_urls_visited: int = 0
     total_items_scraped: int = 0

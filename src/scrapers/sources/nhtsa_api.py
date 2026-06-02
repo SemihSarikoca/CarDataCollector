@@ -14,7 +14,7 @@ If `metadata.vehicles` is missing, a small built-in default list is used.
 """
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import AsyncGenerator, Optional
 
 import httpx
@@ -67,7 +67,7 @@ class NHTSAAPIScraper(BaseScraper):
         meta = getattr(source_config, "metadata", None) or {}
         self.vehicles = meta.get("vehicles") or DEFAULT_VEHICLES
 
-    async def scrape_listing(self, url: str) -> list[str]:
+    async def scrape_listing(self, url: str, html: Optional[str] = None) -> list[str]:
         return []
 
     async def scrape_item(self, url: str) -> Optional[ScrapedItem]:
@@ -81,17 +81,25 @@ class NHTSAAPIScraper(BaseScraper):
 
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                for vehicle in self.vehicles:
-                    if not self._is_running or emitted >= max_items:
-                        break
+                sem = asyncio.Semaphore(5)
 
-                    make = vehicle["make"]
-                    model = vehicle["model"]
-                    year = vehicle["year"]
+                async def _bounded(v):
+                    async with sem:
+                        if not self._is_running:
+                            return []
+                        return await self._fetch_vehicle(client, v["make"], v["model"], v["year"])
 
-                    items = await self._fetch_vehicle(client, make, model, year)
-                    for item in items:
-                        if emitted >= max_items:
+                all_results = await asyncio.gather(
+                    *[_bounded(v) for v in self.vehicles],
+                    return_exceptions=True,
+                )
+
+                for result in all_results:
+                    if isinstance(result, Exception):
+                        logger.warning("nhtsa_vehicle_error", error=str(result))
+                        continue
+                    for item in result:
+                        if not self._is_running or emitted >= max_items:
                             break
                         item.content_hash = self.get_content_hash(item.content_text)
                         item.url_hash = self.get_url_hash(item.page_url)
@@ -99,6 +107,8 @@ class NHTSAAPIScraper(BaseScraper):
                         self._pages_scraped += 1
                         emitted += 1
                         yield item
+                    if emitted >= max_items:
+                        break
         finally:
             await self.stop()
 
@@ -167,7 +177,7 @@ class NHTSAAPIScraper(BaseScraper):
             content_text=content_text,
             content_html="",
             author="NHTSA",
-            date_published=datetime.utcnow(),
+            date_published=datetime.now(timezone.utc),
             category=category,
             language="en",
             metadata={

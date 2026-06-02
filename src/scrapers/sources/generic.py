@@ -1,7 +1,7 @@
 """
 Generic Forum & Content Scrapers
-Konfigürasyondaki CSS seçicileri kullanarak çalışan genel scraper'lar.
-Yeni kaynak eklendiğinde özel scraper yazmaya gerek kalmadan config ile çalışır.
+Config-driven scrapers that use CSS selectors from settings.yaml.
+Used automatically for any source not registered in CUSTOM_SCRAPERS.
 """
 
 from datetime import datetime
@@ -24,8 +24,9 @@ class GenericForumScraper(BaseScraper):
     def __init__(self, source_config: SourceConfig, global_config: dict):
         super().__init__(source_config, global_config)
 
-    async def scrape_listing(self, url: str) -> list[str]:
-        html = await self.fetch_page(url)
+    async def scrape_listing(self, url: str, html: Optional[str] = None) -> list[str]:
+        if html is None:
+            html = await self.fetch_page(url)
         if not html:
             return []
 
@@ -33,7 +34,6 @@ class GenericForumScraper(BaseScraper):
         selector = self.selectors.get("thread_list", "a")
         urls = self.extract_all_links(soup, selector)
 
-        # Filtrele: dış linkler ve aynı sayfayı gösteren linkler
         filtered = []
         for u in urls:
             if self.base_url in u and u != url:
@@ -95,7 +95,7 @@ class GenericForumScraper(BaseScraper):
             source_name=self.name,
             source_url=self.base_url,
             page_url=url,
-            title=title or f"{self.name} Konusu",
+            title=title or f"{self.name} thread",
             content_text=combined,
             content_html="",
             author=author,
@@ -114,8 +114,9 @@ class GenericContentScraper(BaseScraper):
     def __init__(self, source_config: SourceConfig, global_config: dict):
         super().__init__(source_config, global_config)
 
-    async def scrape_listing(self, url: str) -> list[str]:
-        html = await self.fetch_page(url)
+    async def scrape_listing(self, url: str, html: Optional[str] = None) -> list[str]:
+        if html is None:
+            html = await self.fetch_page(url)
         if not html:
             return []
 
@@ -123,15 +124,12 @@ class GenericContentScraper(BaseScraper):
         selector = self.selectors.get("article_list", "article a")
         urls = self.extract_all_links(soup, selector)
 
+        skip_patterns = ["/category/", "/tag/", "/author/", "/page/"]
         filtered = []
         for u in urls:
-            if u != url and u not in filtered:
-                # İç linkler
-                if self.base_url in u:
-                    # Kategori/tag sayfalarını atla
-                    skip_patterns = ["/category/", "/tag/", "/author/", "/page/"]
-                    if not any(p in u for p in skip_patterns):
-                        filtered.append(u)
+            if u != url and u not in filtered and self.base_url in u:
+                if not any(p in u for p in skip_patterns):
+                    filtered.append(u)
 
         logger.debug("generic_content_listing", source=self.name, count=len(filtered))
         return filtered[:60]
@@ -178,7 +176,7 @@ class GenericContentScraper(BaseScraper):
             source_name=self.name,
             source_url=self.base_url,
             page_url=url,
-            title=title or f"{self.name} Makalesi",
+            title=title or f"{self.name} article",
             content_text=content_text,
             content_html=content_html,
             author=author,

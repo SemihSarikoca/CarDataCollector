@@ -133,6 +133,60 @@ class RedisManager:
             pass
 
     # ------------------------------------------------------------------
+    # Batch operations (Redis pipeline — one round-trip for N keys)
+    # ------------------------------------------------------------------
+
+    async def batch_get_content_hash_docs(self, hashes: list[str]) -> dict[str, Optional[str]]:
+        """Return doc_id for each content hash in one pipeline round-trip."""
+        if not self.connected or not hashes:
+            return {}
+        try:
+            pipe = self._client.pipeline(transaction=False)
+            for h in hashes:
+                pipe.get(self._content_key(h))
+            results = await pipe.execute()
+            return {h: v for h, v in zip(hashes, results)}
+        except Exception:
+            return {}
+
+    async def batch_set_content_hash_docs(self, mapping: dict[str, str]):
+        """SET multiple content_hash → doc_id entries in one pipeline round-trip."""
+        if not self.connected or not mapping:
+            return
+        try:
+            pipe = self._client.pipeline(transaction=False)
+            for h, doc_id in mapping.items():
+                pipe.set(self._content_key(h), doc_id, ex=self.dup_ttl)
+            await pipe.execute()
+        except Exception:
+            pass
+
+    async def batch_is_url_visited(self, url_hashes: list[str]) -> dict[str, bool]:
+        """Check multiple URL hashes for visited status in one pipeline round-trip."""
+        if not self.connected or not url_hashes:
+            return {}
+        try:
+            pipe = self._client.pipeline(transaction=False)
+            for h in url_hashes:
+                pipe.exists(self._url_key(h))
+            results = await pipe.execute()
+            return {h: bool(v) for h, v in zip(url_hashes, results)}
+        except Exception:
+            return {}
+
+    async def batch_mark_urls_visited(self, mapping: dict[str, str]):
+        """SET multiple url_hash → content_hash entries in one pipeline round-trip."""
+        if not self.connected or not mapping:
+            return
+        try:
+            pipe = self._client.pipeline(transaction=False)
+            for url_hash, content_hash in mapping.items():
+                pipe.set(self._url_key(url_hash), content_hash or "1", ex=self.url_ttl)
+            await pipe.execute()
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
     # Generic K/V (used for orchestrator state)
     # ------------------------------------------------------------------
 

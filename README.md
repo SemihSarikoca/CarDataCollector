@@ -29,8 +29,8 @@ English automotive forums and technical sites data collection system for LLM fin
 │              /data/car-collector/raw/html/  (TBs of data)                │
 │              /data/car-collector/qa_output/ (JSONL)                      │
 ├──────────────────────────────────────────────────────────────────────────┤
-│                         Flask Dashboard (:5000)                          │
-│              Real-time monitoring, stats, data browser                   │
+│                         Flask Dashboard (:5050)                          │
+│         Monitoring, stats, data browser, pipeline start/stop             │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -111,7 +111,7 @@ docker-compose up -d
 ```
 
 **Step 5: Monitor the Bot**
-- **Dashboard:** Open `http://localhost:5000` in your web browser to view real-time stats.
+- **Dashboard:** Open `http://localhost:5001` (mapped from container port 5050) to view real-time stats and control the pipeline.
 - **Container Logs:** Watch what the collector is doing in real-time:
   ```bash
   docker-compose logs -f collector
@@ -160,14 +160,94 @@ ollama pull gemma3:12b
 ```
 
 **Step 5: Run the Bot**
-With the database running and dependencies installed, you can now use the CLI commands!
-```bash
-# Run one single pass of scraping (Great for testing)
-python -m src.main single-round
+With the database running and dependencies installed, you can now run the pipeline — see **[Running and Stopping the Pipeline](#running-and-stopping-the-pipeline)** for the three supported ways (CLI foreground, CLI background, Dashboard).
 
-# Start the continuous 7/24 pipeline orchestrator
-python -m src.main run
+---
+
+## Running and Stopping the Pipeline
+
+The pipeline (`python -m src.main run`) loops forever: **scrape → dedup → Q/A → wait `round_delay_seconds` → repeat**. There are three ways to start/stop it.
+
+### Option 1 — Dashboard (easiest, no terminal management)
+
+The dashboard at `http://localhost:5050` has a **Pipeline** tab with **Start / Stop / Run single round** buttons and a live log tail. A `Pipeline` status pill in the top bar shows current state from every tab. The dashboard spawns the pipeline as a detached subprocess; the PID is persisted to `data/pipeline.pid`, so closing the dashboard does not stop the pipeline.
+
+```bash
+# Start the dashboard
+source venv/bin/activate
+python -m src.main dashboard         # http://localhost:5050
+# Then click Start / Stop in the Pipeline tab.
 ```
+
+REST equivalents (also usable from `curl`/scripts):
+
+```bash
+curl -X POST http://localhost:5050/api/pipeline/start
+curl -X POST http://localhost:5050/api/pipeline/stop
+curl -X POST http://localhost:5050/api/pipeline/run-single
+curl       http://localhost:5050/api/pipeline/status
+curl       http://localhost:5050/api/pipeline/logs?lines=200
+```
+
+### Option 2 — CLI in the foreground
+
+Best for quick tests. The pipeline holds the terminal; you watch logs live.
+
+```bash
+source venv/bin/activate
+python -m src.main run             # continuous mode, 7/24
+# … logs stream here …
+# Stop with Ctrl+C (graceful: pipeline finishes the current scrape and cleans up).
+```
+
+Single round (one scrape → dedup → Q/A pass, then exit):
+```bash
+python -m src.main single-round
+```
+
+### Option 3 — CLI in the background (nohup)
+
+For headless servers when the dashboard is overkill.
+
+```bash
+# Start
+source venv/bin/activate
+nohup python -m src.main run > logs/pipeline.out 2>&1 &
+echo $! > data/pipeline.pid           # save PID for later
+
+# Watch
+tail -f logs/pipeline.out
+
+# Stop (graceful)
+kill -TERM "$(cat data/pipeline.pid)"
+# … if it doesn't exit within ~15 s …
+kill -KILL "$(cat data/pipeline.pid)"
+rm data/pipeline.pid
+```
+
+### Option 4 — Docker Compose (production)
+
+```bash
+docker-compose up -d                  # start everything (collector + db + redis)
+docker-compose logs -f collector      # follow logs
+docker-compose stop collector         # graceful stop
+docker-compose start collector        # resume
+docker-compose down                   # stop and remove containers
+```
+
+### How often does the pipeline run?
+
+- One **round** = one full scrape → dedup → Q/A pass across all enabled sources.
+- Between rounds it sleeps for `general.round_delay_seconds` (default **43200 = 12 h**) — see `config/settings.yaml`.
+- Q/A generation only starts when there are `pipeline.stages[generate_qa].min_documents_to_start` (default **100**) unique documents in the DB.
+- Each source also has its own `scrape_interval_hours` for rate-limiting.
+
+### Troubleshooting
+
+- **`Address already in use` on port 5000** — macOS uses port 5000 for **AirPlay Receiver**. The dashboard now defaults to **5050**. To free 5000: System Settings → General → AirDrop & Handoff → AirPlay Receiver → Off.
+- **`python -m src.main run` exits immediately** — check `python -m src.main health`; usually means Postgres or Redis is not reachable. Run `docker-compose up -d postgres redis`.
+- **Q/A stays at 0** — verify (a) Ollama is up (`curl http://localhost:11434/api/tags`), (b) the configured model is pulled (`ollama list`), (c) unique docs ≥ 100. Force a manual run with `python -m src.main generate-qa --batch-size 20`.
+- **Pipeline subprocess from dashboard not stopping** — `kill -TERM "$(cat data/pipeline.pid)"`, then `rm data/pipeline.pid` if needed. The dashboard also exposes `POST /api/pipeline/stop`.
 
 ---
 
@@ -226,13 +306,37 @@ python -m src.main list-sources
 
 ## Dashboard
 
-Access the real-time dashboard at `http://localhost:5000`:
+Access the real-time dashboard at **`http://localhost:5050`** (Docker maps it to `http://localhost:5001`).
 
-- **Stats overview** — Total documents, Q&A pairs, disk usage
-- **Trends chart** — Scraping activity over time
-- **Source status** — Last scrape, next scheduled, error count
-- **Data browser** — Search, filter, paginate collected data
-- **Source distribution** — Pie chart of data per source
+Tabs:
+- **Overview** — totals, 14-day activity chart, source distribution
+- **Sources** — per-source totals, unique counts, Q/A pairs, last scrape
+- **Documents** — searchable, filterable browser (by source, with/without Q/A, full-text search). Click a row for the full content and its Q/A pairs.
+- **Q/A Pairs** — paginated list with filters; on-demand Q/A generation against any batch size
+- **Rounds** — last 20 rounds with scrape/dedup/Q/A counts and error totals
+- **Pipeline** — **Start / Stop / Run single round** controls + live log tail + Q/A export to `data/qa_output/`
+- **System** — Postgres, Redis, and Ollama health, sizes, and model list
+
+The top bar shows a status pill for the pipeline subprocess and quick Start/Stop buttons available from every tab.
+
+### Useful REST endpoints
+
+```
+GET  /api/stats                       # overview counts + disk
+GET  /api/sources                     # per-source totals
+GET  /api/data?source=…&search=…      # paginated documents
+GET  /api/data/<doc_id>               # one document + its Q/A
+GET  /api/qa?brand=…&search=…         # paginated Q/A pairs
+GET  /api/qa/stats                    # avg lengths, per-source, per-brand
+POST /api/qa/generate                 # trigger Q/A generation
+GET  /api/system/status               # postgres / redis / ollama checks
+GET  /api/pipeline/status             # pipeline subprocess state
+POST /api/pipeline/start              # start `src.main run`
+POST /api/pipeline/stop               # SIGTERM (then SIGKILL after grace)
+POST /api/pipeline/run-single         # one-shot single-round
+POST /api/pipeline/export-qa          # export to data/qa_output/
+GET  /api/pipeline/logs?lines=200     # tail dashboard-spawned pipeline log
+```
 
 ## Configuration
 

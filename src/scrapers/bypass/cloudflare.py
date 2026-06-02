@@ -379,9 +379,9 @@ class BrowserPool:
         self._browser = await self._playwright.chromium.launch(
             headless=playwright_config.get("headless", True),
             args=[
-                "--disable-blink-features=AutomationControlled",
                 "--disable-dev-shm-usage",
                 "--no-sandbox",
+                "--disable-setuid-sandbox",
             ]
         )
         
@@ -438,8 +438,6 @@ class BrowserPool:
         
         try:
             page = await context.new_page()
-            await stealth_async(page)
-            
             response = await page.goto(url, wait_until="domcontentloaded", timeout=60000)
             
             if not response:

@@ -93,29 +93,70 @@ def ensure_dir(path: str) -> Path:
     return p
 
 
+_CAR_MODELS: dict[str, list[str]] = {
+    "Toyota":        ["Camry", "Corolla", "RAV4", "Tacoma", "Highlander", "Prius", "Tundra",
+                      "Sienna", "Avalon", "Venza", "4Runner", "Sequoia", "Land Cruiser"],
+    "Honda":         ["Civic", "Accord", "CR-V", "Pilot", "Odyssey", "HR-V", "Passport",
+                      "Ridgeline", "Fit", "Insight"],
+    "Ford":          ["F-150", "F-250", "F-350", "Escape", "Explorer", "Mustang", "Bronco",
+                      "Edge", "Expedition", "Ranger", "Fusion", "Focus", "Transit"],
+    "Chevrolet":     ["Silverado", "Equinox", "Malibu", "Traverse", "Tahoe", "Suburban",
+                      "Colorado", "Trax", "Blazer", "Camaro", "Corvette"],
+    "Chevy":         ["Silverado", "Equinox", "Malibu", "Traverse", "Tahoe", "Suburban"],
+    "Nissan":        ["Altima", "Rogue", "Sentra", "Pathfinder", "Frontier", "Murano",
+                      "Armada", "Maxima", "Versa", "Kicks", "Titan"],
+    "Hyundai":       ["Elantra", "Sonata", "Tucson", "Santa Fe", "Palisade", "Kona",
+                      "Ioniq", "Veloster", "Accent"],
+    "Kia":           ["Optima", "Sorento", "Sportage", "Telluride", "Stinger", "Soul",
+                      "Forte", "Seltos", "Niro", "K5"],
+    "Subaru":        ["Outback", "Forester", "Crosstrek", "Impreza", "Legacy", "Ascent",
+                      "WRX", "BRZ"],
+    "Jeep":          ["Wrangler", "Grand Cherokee", "Cherokee", "Compass", "Renegade",
+                      "Gladiator"],
+    "BMW":           ["328i", "330i", "530i", "540i", "X5", "X3", "X1", "3 Series",
+                      "5 Series", "7 Series", "M3", "M5", "M4"],
+    "Volkswagen":    ["Jetta", "Tiguan", "Atlas", "Passat", "Golf", "GTI", "ID.4", "Taos"],
+    "VW":            ["Jetta", "Tiguan", "Atlas", "Passat", "Golf", "GTI"],
+    "Mercedes-Benz": ["C300", "E350", "GLC", "GLE", "C-Class", "E-Class", "S-Class",
+                      "A-Class", "GLS", "CLA"],
+    "Mercedes":      ["C300", "E350", "GLC", "GLE", "C-Class", "E-Class", "S-Class"],
+    "Dodge":         ["Ram 1500", "Charger", "Challenger", "Durango", "Journey"],
+    "Ram":           ["1500", "2500", "3500", "ProMaster"],
+    "GMC":           ["Sierra", "Terrain", "Acadia", "Yukon", "Canyon"],
+    "Mazda":         ["CX-5", "Mazda3", "CX-9", "MX-5", "Mazda6", "CX-30"],
+    "Lexus":         ["RX350", "RX450h", "IS300", "ES350", "GX460", "RX", "IS", "ES", "GX"],
+    "Audi":          ["A4", "Q5", "A3", "Q7", "Q3", "A6", "Q8", "TT", "e-tron"],
+    "Tesla":         ["Model 3", "Model Y", "Model S", "Model X", "Cybertruck"],
+    "Acura":         ["MDX", "RDX", "TLX", "ILX"],
+    "Infiniti":      ["QX60", "Q50", "QX80", "QX50"],
+    "Mitsubishi":    ["Outlander", "Eclipse Cross", "Galant", "Lancer"],
+    "Volvo":         ["XC90", "XC60", "S60", "V60", "XC40"],
+    "Porsche":       ["911", "Cayenne", "Macan", "Panamera", "Taycan"],
+    "Cadillac":      ["Escalade", "XT5", "CT5", "XT4"],
+    "Buick":         ["Enclave", "Encore", "LaCrosse"],
+    "Lincoln":       ["Navigator", "Aviator", "Corsair"],
+    "Chrysler":      ["300", "Pacifica", "Voyager"],
+}
+
+
 def extract_car_info(text: str) -> dict:
-    """Metinden marka/model/yıl bilgisi çıkarmaya çalış"""
-    car_brands = [
-        "Toyota", "Honda", "Ford", "BMW", "Mercedes", "Audi", "Volkswagen", "VW",
-        "Renault", "Fiat", "Peugeot", "Citroen", "Opel", "Hyundai", "Kia",
-        "Nissan", "Mazda", "Volvo", "Skoda", "Seat", "Dacia", "Suzuki",
-        "Mitsubishi", "Subaru", "Jeep", "Land Rover", "Range Rover",
-        "Porsche", "Ferrari", "Lamborghini", "Maserati", "Alfa Romeo",
-        "Mini", "Chevrolet", "Dodge", "Cadillac", "Tesla", "BYD",
-        "Togg", "Tofaş", "Proton", "Geely", "Chery", "MG",
-        "Cupra", "DS", "Smart", "Lexus", "Infiniti", "Acura",
-    ]
-
+    """Extract make/model/year from text using a heuristic scan."""
     info = {"brand": "", "model": "", "year": ""}
-
     text_lower = text.lower()
-    for brand in car_brands:
+
+    # Find brand; first match wins
+    for brand, models in _CAR_MODELS.items():
         if brand.lower() in text_lower:
             info["brand"] = brand
+            # Find model belonging to that brand
+            for model in models:
+                if model.lower() in text_lower:
+                    info["model"] = model
+                    break
             break
 
-    # Yıl tespiti (1990-2030)
-    year_match = re.search(r"\b(19[9]\d|20[0-3]\d)\b", text)
+    # Year detection (1960-2039 covers classics through near-future)
+    year_match = re.search(r"\b(19[6-9]\d|20[0-3]\d)\b", text)
     if year_match:
         info["year"] = year_match.group(1)
 
@@ -124,8 +165,8 @@ def extract_car_info(text: str) -> dict:
 
 def estimate_content_quality(text: str) -> float:
     """
-    İçerik kalite tahmini (0.0 - 1.0).
-    Kısa, anlamsız, reklam içeriklerini düşük puanlar.
+    Estimate content quality score (0.0 - 1.0).
+    Short or non-technical content scores lower.
     """
     if not text:
         return 0.0
@@ -133,7 +174,6 @@ def estimate_content_quality(text: str) -> float:
     score = 0.0
     word_count = len(text.split())
 
-    # Minimum uzunluk
     if word_count < 20:
         return 0.1
     elif word_count < 50:
@@ -145,16 +185,17 @@ def estimate_content_quality(text: str) -> float:
     else:
         score += 0.8
 
-    # Teknik terimler varsa bonus
+    # Bonus for English automotive technical vocabulary
     technical_terms = [
-        "motor", "şanzıman", "fren", "süspansiyon", "turbo", "dizel", "benzin",
-        "beygir", "tork", "yakıt", "km/h", "hp", "cc", "silindir",
-        "vites", "otomatik", "manuel", "debriyaj", "radyatör", "yağ",
-        "filtre", "balata", "amortisör", "rot", "lastik", "jant",
-        "abs", "esp", "airbag", "klima", "lpg", "cng", "elektrik",
-        "hibrit", "akü", "alternatör", "marş", "enjektör", "egzoz",
-        "katalitik", "turbo", "intercooler", "supap", "eksantrik",
-        "krank", "piston", "segman", "conta", "kayış", "triger",
+        "engine", "transmission", "brake", "suspension", "turbo", "diesel", "gasoline",
+        "horsepower", "torque", "fuel", "mph", "hp", "cc", "cylinder",
+        "automatic", "manual", "clutch", "radiator", "coolant",
+        "filter", "brake pad", "shock absorber", "wheel bearing", "tire", "wheel",
+        "abs", "traction control", "airbag", "alternator", "starter",
+        "injector", "exhaust", "catalytic converter", "intercooler",
+        "valve", "camshaft", "crankshaft", "piston", "head gasket",
+        "timing belt", "timing chain", "serpentine belt", "oil change",
+        "obd", "check engine", "misfire", "spark plug", "dtc",
     ]
     term_count = sum(1 for term in technical_terms if term in text.lower())
     score += min(0.2, term_count * 0.02)

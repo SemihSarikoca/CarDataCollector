@@ -257,10 +257,11 @@ class BaseScraper(ABC):
             return None
 
     @abstractmethod
-    async def scrape_listing(self, url: str) -> list[str]:
+    async def scrape_listing(self, url: str, html: Optional[str] = None) -> list[str]:
         """
-        Extract topic/article URLs from listing page.
-        Must be implemented by subclasses.
+        Extract topic/article URLs from a listing page.
+        `html` is the already-fetched page content; if None the implementation
+        should fetch it itself (backward-compatible for custom scrapers).
         """
         pass
 
@@ -314,8 +315,8 @@ class BaseScraper(ABC):
 
                     soup = self.parse_html(html)
 
-                    # Extract URLs from listing
-                    item_urls = await self.scrape_listing(current_url)
+                    # Pass pre-fetched html to avoid a second download of the listing page
+                    item_urls = await self.scrape_listing(current_url, html)
 
                     for item_url in item_urls:
                         if not self._is_running:

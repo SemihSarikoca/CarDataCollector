@@ -6,6 +6,7 @@ Tam eşleşme (hash) + yakın benzerlik (simhash hamming mesafesi) ile çalış�
 
 import hashlib
 import re
+from datetime import datetime, timezone
 from typing import Optional
 
 from datasketch import MinHash, MinHashLSH
@@ -154,13 +155,11 @@ class DeduplicationEngine:
         dedup_config = config.get("deduplication", {})
         self.similarity_threshold = dedup_config.get("similarity_threshold", 0.85)
         self.simhasher = SimHasher(hash_bits=dedup_config.get("simhash_bits", 128))
-        self.minhasher = MinHasher(
-            num_perm=dedup_config.get("minhash_permutations", 128),
-            threshold=self.similarity_threshold,
-        )
         self.ngram_size = dedup_config.get("ngram_size", 3)
         self.batch_size = dedup_config.get("batch_size", 1000)
         self.use_redis = dedup_config.get("use_redis_cache", True)
+        # High-water mark: only process documents created after the last batch run
+        self._last_batch_dedup_time: Optional[datetime] = None
 
     async def check_duplicate(self, content_text: str, content_hash: str,
                                url_hash: str) -> tuple[bool, Optional[str], str]:
@@ -233,14 +232,17 @@ class DeduplicationEngine:
 
     async def run_batch_dedup(self) -> dict:
         """
-        Toplu duplikasyon kontrolü çalıştır.
-        Henüz kontrol edilmemiş dökümanlar için.
+        Post-round near-duplicate sweep using SimHash.
+        Only processes documents added since the last batch run to avoid O(n²) rescans.
         """
         stats = {"checked": 0, "duplicates_found": 0}
         offset = 0
+        run_start = datetime.now(timezone.utc)
 
         while True:
-            docs = await self.db.get_non_duplicate_documents(self.batch_size, offset)
+            docs = await self.db.get_non_duplicate_documents(
+                self.batch_size, offset, since=self._last_batch_dedup_time
+            )
             if not docs:
                 break
 
@@ -276,5 +278,7 @@ class DeduplicationEngine:
 
             offset += self.batch_size
 
+        # Advance high-water mark so the next round only checks new documents
+        self._last_batch_dedup_time = run_start
         logger.info("batch_dedup_complete", **stats)
         return stats

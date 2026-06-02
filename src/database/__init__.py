@@ -9,6 +9,7 @@ section of settings.yaml.
 import asyncio
 import json
 import os
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -139,7 +140,6 @@ class DatabaseManager:
                 ON CONFLICT (name) DO UPDATE SET
                     source_type = EXCLUDED.source_type,
                     base_url = EXCLUDED.base_url,
-                    enabled = EXCLUDED.enabled,
                     priority = EXCLUDED.priority,
                     rate_limit_seconds = EXCLUDED.rate_limit_seconds,
                     scrape_interval_hours = EXCLUDED.scrape_interval_hours,
@@ -153,6 +153,16 @@ class DatabaseManager:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow("SELECT id FROM sources WHERE name = $1", name)
             return str(row["id"]) if row else None
+
+    async def get_source_enabled_states(self, names: list) -> dict:
+        """Return {name: enabled} from the DB for the given source names."""
+        if not names:
+            return {}
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT name, enabled FROM sources WHERE name = ANY($1)", names
+            )
+            return {r["name"]: r["enabled"] for r in rows}
 
     # ------------------------------------------------------------------
     # Document operations
@@ -190,7 +200,7 @@ class DatabaseManager:
             """,
                 source_id, doc.source_name, doc.source_url or "", doc.page_url,
                 doc.url_hash, doc.content_hash, doc.simhash or "",
-                doc.title or "", "", doc.content_html or None,
+                doc.title or "", "", None,
                 doc.author or "", category, doc.language or "en",
                 doc.word_count or 0, doc.content_length or 0,
                 doc.file_size_bytes or 0, doc.file_path_html or "",
@@ -239,21 +249,32 @@ class DatabaseManager:
                 SELECT * FROM scraped_data
                 WHERE pipeline_stage IN ('deduplicated','quality_checked','stored')
                   AND is_duplicate = false AND qa_count = 0
-                ORDER BY content_length DESC
+                  AND word_count >= 20 AND content_length >= 100
+                ORDER BY quality_score DESC NULLS LAST, content_length DESC
                 LIMIT $1
             """, limit)
             return [_row_to_dict(r) for r in rows]
 
     async def get_non_duplicate_documents(self, batch_size: int = 1000,
-                                           offset: int = 0) -> list[dict]:
+                                           offset: int = 0,
+                                           since: Optional[datetime] = None) -> list[dict]:
         async with self._pool.acquire() as conn:
-            rows = await conn.fetch("""
-                SELECT id, content_hash, simhash, created_at
-                FROM scraped_data
-                WHERE is_duplicate = false
-                ORDER BY created_at
-                LIMIT $1 OFFSET $2
-            """, batch_size, offset)
+            if since is not None:
+                rows = await conn.fetch("""
+                    SELECT id, content_hash, simhash, created_at
+                    FROM scraped_data
+                    WHERE is_duplicate = false AND created_at > $3
+                    ORDER BY created_at
+                    LIMIT $1 OFFSET $2
+                """, batch_size, offset, since)
+            else:
+                rows = await conn.fetch("""
+                    SELECT id, content_hash, simhash, created_at
+                    FROM scraped_data
+                    WHERE is_duplicate = false
+                    ORDER BY created_at
+                    LIMIT $1 OFFSET $2
+                """, batch_size, offset)
             return [_row_to_dict(r) for r in rows]
 
     async def get_total_documents(self) -> int:
@@ -400,6 +421,20 @@ class DatabaseManager:
     # Round summaries
     # ------------------------------------------------------------------
 
+    async def cleanup_stale_rounds(self) -> int:
+        """Mark all 'running' rounds as 'interrupted' — called at startup to fix rows
+        left open by a previous process that was killed before complete_round()."""
+        async with self._pool.acquire() as conn:
+            res = await conn.execute("""
+                UPDATE rounds
+                SET status = 'interrupted', end_time = CURRENT_TIMESTAMP
+                WHERE status = 'running'
+            """)
+            try:
+                return int(res.split()[-1])
+            except Exception:
+                return 0
+
     async def start_round(self, round_number: int) -> int:
         async with self._pool.acquire() as conn:
             await conn.execute("""
@@ -450,6 +485,56 @@ class DatabaseManager:
             return val or 0
 
     # ------------------------------------------------------------------
+    # Scrape logs
+    # ------------------------------------------------------------------
+
+    async def get_last_scrape_times(self, source_names: list) -> dict:
+        """Return {source_name: last_started_at} for the given sources."""
+        if not source_names:
+            return {}
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT source_name, MAX(started_at) AS last_scraped_at
+                FROM scrape_logs
+                WHERE source_name = ANY($1)
+                GROUP BY source_name
+            """, source_names)
+            return {row["source_name"]: row["last_scraped_at"] for row in rows}
+
+    async def log_scrape_start(self, source_name: str, round_number: int) -> str:
+        """Insert a running scrape_logs row; returns the log UUID."""
+        async with self._pool.acquire() as conn:
+            source_id = await conn.fetchval(
+                "SELECT id FROM sources WHERE name = $1", source_name
+            )
+            log_id = await conn.fetchval("""
+                INSERT INTO scrape_logs (source_id, source_name, round_number, status)
+                VALUES ($1, $2, $3, 'running')
+                RETURNING id
+            """, source_id, source_name, round_number)
+            return str(log_id)
+
+    async def log_scrape_complete(self, log_id: str, stats: dict):
+        """Finalise a scrape_logs row with results."""
+        status = (
+            "failed"
+            if stats.get("errors", 0) > 0 and stats.get("items", 0) == 0
+            else "success"
+        )
+        async with self._pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE scrape_logs SET
+                    finished_at = CURRENT_TIMESTAMP,
+                    status = $2,
+                    items_scraped = $3,
+                    items_stored = $4,
+                    errors_count = $5,
+                    duration_seconds = EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - started_at))
+                WHERE id = $1
+            """, uuid.UUID(log_id), status,
+                stats.get("items", 0), stats.get("stored", 0), stats.get("errors", 0))
+
+    # ------------------------------------------------------------------
     # Aggregate stats
     # ------------------------------------------------------------------
 
@@ -489,6 +574,11 @@ class DatabaseManager:
     # Generic helpers (used by dashboard / CLI scripts)
     # ------------------------------------------------------------------
 
+    async def execute(self, query: str, *args) -> str:
+        """Run a DML statement (INSERT / UPDATE / DELETE). Returns asyncpg status string."""
+        async with self._pool.acquire() as conn:
+            return await conn.execute(query, *args)
+
     async def fetch(self, query: str, *args) -> list[dict]:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(query, *args)
@@ -501,3 +591,37 @@ class DatabaseManager:
     async def fetchval(self, query: str, *args) -> Any:
         async with self._pool.acquire() as conn:
             return await conn.fetchval(query, *args)
+
+    async def update_document_content(self, doc_id: str, fields: dict) -> None:
+        """Update mutable content fields on a scraped_data row (content changed on re-scrape)."""
+        allowed = {
+            "content_hash", "content_text", "content_html", "word_count",
+            "content_length", "file_path_html", "file_size_bytes",
+            "round_number", "pipeline_stage", "simhash",
+        }
+        data = {k: v for k, v in fields.items() if k in allowed}
+        if not data:
+            return
+        keys = list(data.keys())
+        vals = list(data.values())
+        set_parts = [f"{k} = ${i + 1}" for i, k in enumerate(keys)]
+        sql = f"""
+            UPDATE scraped_data
+            SET {", ".join(set_parts)}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ${len(keys) + 1}
+        """
+        async with self._pool.acquire() as conn:
+            await conn.execute(sql, *vals, doc_id)
+
+    async def delete_qa_for_document(self, doc_id: str) -> int:
+        """Delete all Q/A pairs for a document and reset its qa_count. Returns count deleted."""
+        async with self._pool.acquire() as conn:
+            res = await conn.execute("DELETE FROM qa_pairs WHERE document_id = $1", doc_id)
+            try:
+                count = int(res.split()[-1])
+            except Exception:
+                count = 0
+            await conn.execute(
+                "UPDATE scraped_data SET qa_count = 0 WHERE id = $1", doc_id
+            )
+            return count

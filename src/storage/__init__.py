@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Optional
 
 import aiofiles
+from langdetect import detect as _langdetect, DetectorFactory, LangDetectException
+
+DetectorFactory.seed = 0  # deterministic results across runs
 
 from src.models import ContentCategory, PipelineStage, ScrapedItem, StoredDocument
 from src.database import DatabaseManager
@@ -41,7 +44,13 @@ class StorageManager:
         self.processed_dir = self.base_path / storage_config.get("processed_dir", "processed")
         self.temp_dir = self.base_path / storage_config.get("temp_dir", "temp")
         self.max_file_size_mb = storage_config.get("max_file_size_mb", 50)
-        self.disk_warning_threshold = storage_config.get("disk_warning_threshold_percent", 90)
+        self.disk_warning_threshold = storage_config.get("disk_warning_threshold_percent", 97)
+        self.disk_minimum_free_gb = storage_config.get("disk_minimum_free_gb", 2)
+
+        quality_config = config.get("quality", {})
+        self.enforce_english = quality_config.get("enforce_english", True)
+        self.min_content_length = quality_config.get("min_content_length", 100)
+        self.min_word_count = quality_config.get("min_word_count", 20)
 
     async def initialize(self):
         """Dizinleri oluştur"""
@@ -62,10 +71,21 @@ class StorageManager:
         timestamp = item.date_scraped.strftime("%Y%m%d_%H%M%S")
         return f"{timestamp}_{url_hash_short}_{safe_title}"
 
+    def _detect_language(self, text: str) -> str:
+        """Return ISO-639-1 language code; falls back to 'en' on short or ambiguous text."""
+        if not text or len(text) < 50:
+            return "en"
+        try:
+            return _langdetect(text[:2000])
+        except LangDetectException:
+            return "en"
+
     async def check_disk_space(self) -> bool:
         """Disk alanını kontrol et. Yetersizse False döndür."""
         usage = get_disk_usage(str(self.base_path))
-        if usage["percent"] >= self.disk_warning_threshold:
+        too_full = usage["percent"] >= self.disk_warning_threshold
+        too_low = usage["free_gb"] < self.disk_minimum_free_gb
+        if too_full or too_low:
             logger.warning(
                 "disk_space_low",
                 path=str(self.base_path),
@@ -75,26 +95,91 @@ class StorageManager:
             return False
         return True
 
+    async def _handle_content_update(self, existing: dict, item: ScrapedItem,
+                                     round_number: int) -> None:
+        """Re-scrape detected a content change: overwrite file, update DB, delete stale Q/A."""
+        doc_id = existing["id"]
+        html_content = self._wrap_html(item)
+        content_bytes = html_content.encode("utf-8")
+
+        filename = self._generate_filename(item)
+        source_dir = self._get_source_dir(item.source_name, "html")
+        html_path = source_dir / f"{filename}.html"
+
+        async with aiofiles.open(html_path, "w", encoding="utf-8") as f:
+            await f.write(html_content)
+
+        word_count = len(item.content_text.split()) if item.content_text else 0
+        await self.db.update_document_content(doc_id, {
+            "content_hash":    item.content_hash,
+            "content_text":    item.content_text or "",
+            "content_html":    item.content_html,
+            "word_count":      word_count,
+            "content_length":  len(item.content_text or ""),
+            "file_path_html":  str(html_path),
+            "file_size_bytes": len(content_bytes),
+            "round_number":    round_number,
+            "pipeline_stage":  PipelineStage.STORED.value,
+        })
+
+        simhash_hex = await self.dedup.compute_and_store_simhash(doc_id, item.content_text)
+        if simhash_hex:
+            await self.db.execute(
+                "UPDATE scraped_data SET simhash = $1 WHERE id = $2", simhash_hex, doc_id
+            )
+
+        await self.db.mark_url_visited(
+            item.url_hash, item.page_url, item.source_name, item.content_hash
+        )
+        if self.dedup.cache:
+            await self.dedup.cache.mark_url_visited(item.url_hash, item.content_hash)
+            await self.dedup.cache.set_content_hash_doc(item.content_hash, doc_id)
+
+        logger.info("content_updated", url=item.page_url, doc_id=doc_id)
+
     async def store_item(self, item: ScrapedItem, round_number: int = 0) -> Optional[StoredDocument]:
         """
-        Scraped item'ı depola:
-        1. Duplikasyon kontrolü
-        2. HTML olarak kaydet
-        3. Veritabanına metadata yaz
-        4. SimHash hesapla ve indeksle
+        Store a scraped item:
+        1. Quality / language gate
+        2. Content-change check (re-scrape): update document + delete stale Q/A
+        3. Deduplication check for new URLs
+        4. Write HTML to disk and insert DB row
+        5. Compute SimHash
         """
-        # Disk kontrolü
+        # Disk check
         if not await self.check_disk_space():
             logger.error("disk_full_skipping_item", url=item.page_url)
             return None
 
-        # Hash'leri garanti altına al
+        # Ensure hashes are computed
         if not item.content_hash:
             item.content_hash = item.compute_content_hash()
         if not item.url_hash:
             item.url_hash = item.compute_url_hash()
 
-        # Duplikasyon kontrolü
+        # Language detection + quality gate
+        text = item.content_text or ""
+        item.language = self._detect_language(text)
+        if self.enforce_english and item.language != "en":
+            logger.debug("non_english_skipped", url=item.page_url,
+                         language=item.language, source=item.source_name)
+            return None
+        if len(text) < self.min_content_length or len(text.split()) < self.min_word_count:
+            logger.debug("content_too_short_skipped", url=item.page_url,
+                         chars=len(text), words=len(text.split()))
+            return None
+
+        # Content-change check: if this URL was previously stored with DIFFERENT content,
+        # update the existing document and delete its now-stale Q/A pairs.
+        if item.url_hash:
+            existing = await self.db.get_document_by_url_hash(item.url_hash)
+            if existing and not existing.get("is_duplicate"):
+                if existing.get("content_hash") == item.content_hash:
+                    return None  # unchanged — nothing to do
+                await self._handle_content_update(existing, item, round_number)
+                return None  # updated in-place, no new document created
+
+        # Deduplication check for new URLs
         is_dup, dup_of, method = await self.dedup.check_duplicate(
             item.content_text, item.content_hash, item.url_hash
         )
@@ -170,18 +255,18 @@ class StorageManager:
         doc_id = await self.db.insert_document(doc)
 
         if doc_id:
-            # Ayrıca content_text'i DB'ye yaz (arama/önizleme için)
-            await self.db.fetchval("""
+            # Write content_text/html for search/preview
+            await self.db.execute("""
                 UPDATE scraped_data SET content_text = $1, content_html = $2
                 WHERE id = $3
             """, item.content_text or "", item.content_html or None, doc_id)
 
-            # SimHash hesapla ve indeksle
+            # Compute SimHash and index it
             simhash_hex = await self.dedup.compute_and_store_simhash(
                 doc_id, item.content_text
             )
             if simhash_hex:
-                await self.db.fetchval(
+                await self.db.execute(
                     "UPDATE scraped_data SET simhash = $1 WHERE id = $2",
                     simhash_hex, doc_id,
                 )
@@ -206,7 +291,7 @@ class StorageManager:
     def _wrap_html(self, item: ScrapedItem) -> str:
         """ScrapedItem'ı tam HTML dökümanına dönüştür"""
         return f"""<!DOCTYPE html>
-<html lang="tr">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="source" content="{item.source_name}">

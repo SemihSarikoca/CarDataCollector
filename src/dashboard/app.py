@@ -11,17 +11,24 @@ from __future__ import annotations
 
 import os
 import re
+import signal
+import subprocess
+import sys
 import threading
-from datetime import datetime, timedelta
+import time
+from collections import deque
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+
+import secrets
 
 import httpx
 import psycopg2
 import psycopg2.extras
 import redis
 from bs4 import BeautifulSoup
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 from flask_cors import CORS
 
 from src.utils.helpers import get_disk_usage, load_config
@@ -72,6 +79,16 @@ def configure(config: dict):
         "ollama_url", "http://localhost:11434"
     )
     _state["base_path"] = config.get("storage", {}).get("base_path", "./data")
+
+    # Auth — token from env var takes precedence over config
+    dashboard_cfg = config.get("dashboard", {})
+    _state["auth_token"] = (
+        os.environ.get("DASHBOARD_TOKEN")
+        or dashboard_cfg.get("token", "")
+        or ""
+    )
+    # Flask needs a stable secret key for sessions; generate one per process if not set
+    app.secret_key = os.environ.get("DASHBOARD_SECRET_KEY") or secrets.token_hex(32)
 
     # Connection pool (lazy — will surface errors on first request)
     try:
@@ -130,6 +147,42 @@ def _query(sql: str, params=None, one: bool = False):
 
 
 # =============================================================================
+# Authentication
+# =============================================================================
+
+@app.before_request
+def require_auth():
+    token = _state.get("auth_token", "")
+    if not token:
+        return  # auth disabled — no token configured
+    public_paths = ("/login", "/logout", "/static")
+    if any(request.path.startswith(p) for p in public_paths):
+        return
+    if not session.get("authenticated"):
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "Unauthorized"}), 401
+        return redirect(url_for("login_page"))
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login_page():
+    if request.method == "POST":
+        submitted = request.form.get("token", "")
+        expected = _state.get("auth_token", "")
+        if expected and secrets.compare_digest(submitted, expected):
+            session["authenticated"] = True
+            return redirect(url_for("index"))
+        return render_template("login.html", error="Invalid token. Try again.")
+    return render_template("login.html", error=None)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login_page"))
+
+
+# =============================================================================
 # Pages
 # =============================================================================
 
@@ -156,7 +209,7 @@ def health():
         "status": "healthy" if db_ok else "degraded",
         "database": db_ok,
         "redis": redis_ok,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     })
 
 
@@ -204,6 +257,106 @@ def get_stats():
     except Exception as e:
         logger.error("stats_error", error=str(e))
         return jsonify({"error": str(e)}), 500
+
+
+# =============================================================================
+# Source editing helpers
+# =============================================================================
+
+def _update_source_in_yaml(name: str, **kwargs) -> bool:
+    """Update source fields in settings.yaml, preserving comments and formatting."""
+    config_path = _PROJECT_ROOT / "config" / "settings.yaml"
+    if not config_path.exists():
+        return False
+
+    def _yaml_val(v):
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        return str(v)
+
+    with open(config_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    in_block = False
+    modified = False
+    remaining = dict(kwargs)
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped in (f'- name: "{name}"', f"- name: '{name}'"):
+            in_block = True
+            continue
+        if in_block and stripped.startswith("- name:"):
+            break
+        if in_block and remaining:
+            for key in list(remaining):
+                if stripped.startswith(f"{key}:"):
+                    indent = len(line) - len(line.lstrip())
+                    lines[i] = " " * indent + f"{key}: {_yaml_val(remaining.pop(key))}\n"
+                    modified = True
+                    break
+
+    if modified:
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+    return modified
+
+
+def _db_update_source(name: str, **kwargs):
+    """Sync psycopg2 update of the sources table."""
+    allowed = {"enabled", "scrape_interval_hours", "priority"}
+    data = {k: v for k, v in kwargs.items() if k in allowed}
+    if not data:
+        return
+    set_parts = [f"{k} = %s" for k in data]
+    values = list(data.values()) + [name]
+    sql = f"UPDATE sources SET {', '.join(set_parts)}, updated_at = NOW() WHERE name = %s"
+    with _PGConn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, values)
+        conn.commit()
+
+
+@app.route("/api/sources/<name>", methods=["PUT"])
+def update_source(name: str):
+    """Update source enabled/interval/priority in DB and settings.yaml."""
+    payload = request.get_json(silent=True) or {}
+    updates: dict = {}
+
+    if "enabled" in payload:
+        updates["enabled"] = bool(payload["enabled"])
+    if "scrape_interval_hours" in payload:
+        val = int(payload["scrape_interval_hours"])
+        if not (1 <= val <= 8760):
+            return jsonify({"ok": False, "error": "interval must be 1–8760 hours"}), 400
+        updates["scrape_interval_hours"] = val
+    if "priority" in payload:
+        val = int(payload["priority"])
+        if not (1 <= val <= 10):
+            return jsonify({"ok": False, "error": "priority must be 1–10"}), 400
+        updates["priority"] = val
+
+    if not updates:
+        return jsonify({"ok": False, "error": "Nothing to update"}), 400
+
+    try:
+        _db_update_source(name, **updates)
+    except Exception as e:
+        logger.error("source_db_update_failed", name=name, error=str(e))
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    try:
+        yaml_ok = _update_source_in_yaml(name, **updates)
+    except Exception as e:
+        logger.warning("source_yaml_update_failed", name=name, error=str(e))
+        yaml_ok = False
+
+    return jsonify({
+        "ok": True,
+        "name": name,
+        "updated": updates,
+        "yaml_updated": yaml_ok,
+    })
 
 
 @app.route("/api/sources")
@@ -466,7 +619,7 @@ def qa_stats():
 def trends():
     try:
         days = max(1, min(60, request.args.get("days", 7, type=int)))
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
         labels = [(today - timedelta(days=i)).isoformat() for i in range(days - 1, -1, -1)]
         scraped = {d: 0 for d in labels}
         dups = {d: 0 for d in labels}
@@ -524,6 +677,29 @@ def source_distribution():
     except Exception as e:
         logger.error("distribution_error", error=str(e))
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/rounds/cleanup", methods=["POST"])
+def rounds_cleanup():
+    """Mark all stale 'running' rounds as 'interrupted'."""
+    try:
+        with _PGConn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE rounds
+                    SET status = 'interrupted', end_time = CURRENT_TIMESTAMP
+                    WHERE status = 'running'
+                """)
+                count = cur.rowcount
+            conn.commit()
+        return jsonify({
+            "ok": True,
+            "cleaned": count,
+            "message": f"{count} stale round(s) marked as interrupted",
+        })
+    except Exception as e:
+        logger.error("rounds_cleanup_error", error=str(e))
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route("/api/rounds")
@@ -644,7 +820,7 @@ def trigger_qa():
                 _qa_state["last_result"] = {
                     "ok": True,
                     "stats": result,
-                    "finished_at": datetime.utcnow().isoformat(),
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
                 }
         except Exception as e:
             logger.error("qa_job_failed", error=str(e))
@@ -652,7 +828,7 @@ def trigger_qa():
                 _qa_state["last_result"] = {
                     "ok": False,
                     "error": str(e),
-                    "finished_at": datetime.utcnow().isoformat(),
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
                 }
         finally:
             with _qa_lock:
@@ -660,7 +836,7 @@ def trigger_qa():
 
     with _qa_lock:
         _qa_state["running"] = True
-        _qa_state["started_at"] = datetime.utcnow().isoformat()
+        _qa_state["started_at"] = datetime.now(timezone.utc).isoformat()
         _qa_state["last_result"] = None
 
     threading.Thread(target=worker, args=(config, batch_size), daemon=True).start()
@@ -682,6 +858,466 @@ def qa_job_status():
 
 
 # =============================================================================
+# Process manager (shared by scrape-loop and qa-loop)
+# =============================================================================
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError):
+        return False
+    except Exception:
+        return False
+
+
+class _ProcessManager:
+    """Manages a long-running subprocess with PID file and dedicated log file."""
+
+    def __init__(self, name: str, pid_file: Path, log_file: Path):
+        self.name = name
+        self.pid_file = pid_file
+        self.log_file = log_file
+        self._lock = threading.Lock()
+        self._popen: Optional[subprocess.Popen] = None
+        self._started_at: Optional[str] = None
+
+    def _read_pid_meta(self) -> dict:
+        out = {"pid": None, "command": None, "started_at": None}
+        try:
+            if not self.pid_file.exists():
+                return out
+            lines = self.pid_file.read_text().splitlines()
+            if lines:
+                out["pid"] = int(lines[0].strip())
+            if len(lines) > 1:
+                out["command"] = lines[1].strip() or None
+            if len(lines) > 2:
+                out["started_at"] = lines[2].strip() or None
+        except Exception:
+            pass
+        return out
+
+    def _write_pid(self, pid: int, command: str):
+        self.pid_file.parent.mkdir(parents=True, exist_ok=True)
+        self.pid_file.write_text(
+            f"{pid}\n{command}\n{datetime.now(timezone.utc).isoformat()}\n"
+        )
+
+    def _clear_pid(self):
+        self.pid_file.unlink(missing_ok=True)
+
+    def is_running(self) -> tuple[bool, Optional[int]]:
+        meta = self._read_pid_meta()
+        pid = meta.get("pid")
+        if pid and _pid_alive(pid):
+            return True, pid
+        if pid:
+            self._clear_pid()
+        return False, None
+
+    def status(self) -> dict:
+        running, pid = self.is_running()
+        meta = self._read_pid_meta()
+        with self._lock:
+            started = self._started_at or meta.get("started_at")
+        return {
+            "running": running,
+            "pid": pid,
+            "command": meta.get("command"),
+            "started_at": started,
+            "log_file": str(self.log_file),
+        }
+
+    def start(self, cli_command: str, extra_args: Optional[list] = None) -> dict:
+        running, pid = self.is_running()
+        if running:
+            return {"ok": False, "error": f"{self.name} already running (pid {pid})", "pid": pid}
+
+        self.log_file.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            log_fh = open(self.log_file, "a", buffering=1, encoding="utf-8")
+            log_fh.write(
+                f"\n=== {datetime.now(timezone.utc).isoformat()} START: {cli_command}"
+                f"{' ' + ' '.join(extra_args) if extra_args else ''} ===\n"
+            )
+            env = os.environ.copy()
+            env.setdefault("PYTHONUNBUFFERED", "1")
+            cmd = [sys.executable, "-m", "src.main", cli_command] + (extra_args or [])
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(_PROJECT_ROOT),
+                stdout=log_fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                env=env, start_new_session=True,
+            )
+        except Exception as e:
+            logger.error(f"{self.name}_spawn_failed", error=str(e))
+            return {"ok": False, "error": str(e)}
+
+        self._write_pid(proc.pid, cli_command)
+        with self._lock:
+            self._popen = proc
+            self._started_at = datetime.now(timezone.utc).isoformat()
+
+        logger.info(f"{self.name}_started", pid=proc.pid)
+        return {
+            "ok": True, "pid": proc.pid,
+            "message": f"{self.name} started",
+            "started_at": self._started_at,
+        }
+
+    def stop(self, grace_seconds: int = 15) -> dict:
+        running, pid = self.is_running()
+        if not running:
+            return {"ok": False, "error": f"{self.name} is not running"}
+
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+        except ProcessLookupError:
+            self._clear_pid()
+            return {"ok": True, "message": f"{self.name} already exited"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+        deadline = time.time() + grace_seconds
+        while time.time() < deadline:
+            if not _pid_alive(pid):
+                break
+            time.sleep(0.5)
+
+        forced = False
+        if _pid_alive(pid):
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+                forced = True
+            except Exception:
+                pass
+
+        self._clear_pid()
+        with self._lock:
+            self._popen = None
+            self._started_at = None
+
+        logger.info(f"{self.name}_stopped", pid=pid, forced=forced)
+        return {
+            "ok": True,
+            "message": f"{self.name} stopped{' (forced)' if forced else ''}",
+            "pid": pid, "forced": forced,
+        }
+
+    def tail_logs(self, lines: int = 200) -> dict:
+        if not self.log_file.exists():
+            return {"lines": [], "log_file": str(self.log_file), "exists": False}
+        try:
+            with open(self.log_file, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                chunk = min(size, 256 * 1024)
+                f.seek(size - chunk)
+                buf = f.read().decode("utf-8", errors="replace")
+            tail = deque(buf.splitlines(), maxlen=lines)
+            return {
+                "lines": list(tail),
+                "log_file": str(self.log_file),
+                "exists": True,
+                "size_bytes": size,
+            }
+        except Exception as e:
+            logger.error(f"{self.name}_log_read_failed", error=str(e))
+            return {"error": str(e)}
+
+
+# Two dedicated process managers
+_scrape_mgr = _ProcessManager(
+    "scrape-loop",
+    _PROJECT_ROOT / "data" / "scrape_loop.pid",
+    _PROJECT_ROOT / "logs" / "scrape_loop.log",
+)
+_qa_loop_mgr = _ProcessManager(
+    "qa-loop",
+    _PROJECT_ROOT / "data" / "qa_loop.pid",
+    _PROJECT_ROOT / "logs" / "qa_loop.log",
+)
+
+# Legacy combined pipeline (kept for backward compat; not shown in new UI)
+_PIPELINE_PID_FILE = _PROJECT_ROOT / "data" / "pipeline.pid"
+_PIPELINE_LOG_FILE = _PROJECT_ROOT / "logs" / "pipeline_dashboard.log"
+_pipeline_lock = threading.Lock()
+_pipeline_state: dict = {"popen": None, "started_at": None, "command": None, "single_round_running": False}
+
+
+def _read_pid_meta() -> dict:
+    out = {"pid": None, "command": None, "started_at": None}
+    try:
+        if not _PIPELINE_PID_FILE.exists():
+            return out
+        lines = _PIPELINE_PID_FILE.read_text().splitlines()
+        if lines:
+            out["pid"] = int(lines[0].strip())
+        if len(lines) > 1:
+            out["command"] = lines[1].strip() or None
+        if len(lines) > 2:
+            out["started_at"] = lines[2].strip() or None
+    except Exception:
+        pass
+    return out
+
+
+def _pipeline_running() -> tuple[bool, Optional[int]]:
+    meta = _read_pid_meta()
+    pid = meta.get("pid")
+    if pid and _pid_alive(pid):
+        return True, pid
+    if pid:
+        _PIPELINE_PID_FILE.unlink(missing_ok=True)
+    return False, None
+
+
+# =============================================================================
+# Scrape loop API
+# =============================================================================
+
+@app.route("/api/scrape/status")
+def scrape_status():
+    return jsonify(_scrape_mgr.status())
+
+
+@app.route("/api/scrape/start", methods=["POST"])
+def scrape_start():
+    result = _scrape_mgr.start("scrape-loop")
+    code = 409 if not result["ok"] and "already running" in result.get("error", "") else (500 if not result["ok"] else 200)
+    return jsonify(result), code
+
+
+@app.route("/api/scrape/stop", methods=["POST"])
+def scrape_stop():
+    grace = max(2, min(60, int((request.get_json(silent=True) or {}).get("grace_seconds", 15))))
+    result = _scrape_mgr.stop(grace)
+    code = 409 if not result["ok"] else 200
+    return jsonify(result), code
+
+
+@app.route("/api/scrape/logs")
+def scrape_logs():
+    lines = max(10, min(2000, request.args.get("lines", 200, type=int)))
+    return jsonify(_scrape_mgr.tail_logs(lines))
+
+
+# =============================================================================
+# Q/A loop API
+# =============================================================================
+
+@app.route("/api/qa-loop/status")
+def qa_loop_status():
+    return jsonify(_qa_loop_mgr.status())
+
+
+@app.route("/api/qa-loop/start", methods=["POST"])
+def qa_loop_start():
+    result = _qa_loop_mgr.start("qa-loop")
+    code = 409 if not result["ok"] and "already running" in result.get("error", "") else (500 if not result["ok"] else 200)
+    return jsonify(result), code
+
+
+@app.route("/api/qa-loop/stop", methods=["POST"])
+def qa_loop_stop():
+    grace = max(2, min(60, int((request.get_json(silent=True) or {}).get("grace_seconds", 15))))
+    result = _qa_loop_mgr.stop(grace)
+    code = 409 if not result["ok"] else 200
+    return jsonify(result), code
+
+
+@app.route("/api/qa-loop/logs")
+def qa_loop_logs():
+    lines = max(10, min(2000, request.args.get("lines", 200, type=int)))
+    return jsonify(_qa_loop_mgr.tail_logs(lines))
+
+
+# =============================================================================
+# Pipeline process control (legacy — kept for backward compat)
+# =============================================================================
+
+def _spawn_pipeline(cli_command: str) -> subprocess.Popen:
+    """Spawn `python -m src.main <cli_command>` detached, logging to file."""
+    _PIPELINE_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    log_fh = open(_PIPELINE_LOG_FILE, "a", buffering=1, encoding="utf-8")
+    log_fh.write(
+        f"\n=== {datetime.now(timezone.utc).isoformat()} dashboard spawn: {cli_command} ===\n"
+    )
+    env = os.environ.copy()
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    return subprocess.Popen(
+        [sys.executable, "-m", "src.main", cli_command],
+        cwd=str(_PROJECT_ROOT),
+        stdout=log_fh,
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
+        env=env,
+        start_new_session=True,
+    )
+
+
+@app.route("/api/pipeline/status")
+def pipeline_status():
+    running, pid = _pipeline_running()
+    meta = _read_pid_meta()
+    with _pipeline_lock:
+        single = _pipeline_state["single_round_running"]
+    return jsonify({
+        "running": running,
+        "pid": pid,
+        "command": meta.get("command"),
+        "started_at": meta.get("started_at"),
+        "single_round_running": single,
+        "log_file": str(_PIPELINE_LOG_FILE),
+    })
+
+
+@app.route("/api/pipeline/start", methods=["POST"])
+def pipeline_start():
+    running, pid = _pipeline_running()
+    if running:
+        return jsonify({"ok": False, "error": f"Pipeline already running (pid {pid})", "pid": pid}), 409
+    try:
+        proc = _spawn_pipeline("run")
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    _PIPELINE_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _PIPELINE_PID_FILE.write_text(f"{proc.pid}\nrun\n{datetime.now(timezone.utc).isoformat()}\n")
+    with _pipeline_lock:
+        _pipeline_state.update({"popen": proc, "started_at": datetime.now(timezone.utc).isoformat(), "command": "run"})
+    return jsonify({"ok": True, "pid": proc.pid, "message": "Pipeline started"})
+
+
+@app.route("/api/pipeline/stop", methods=["POST"])
+def pipeline_stop():
+    running, pid = _pipeline_running()
+    if not running:
+        return jsonify({"ok": False, "error": "Pipeline is not running"}), 409
+    grace = max(2, min(60, int((request.get_json(silent=True) or {}).get("grace_seconds", 15))))
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
+    except ProcessLookupError:
+        _PIPELINE_PID_FILE.unlink(missing_ok=True)
+        return jsonify({"ok": True, "message": "Pipeline already exited"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    deadline = time.time() + grace
+    while time.time() < deadline:
+        if not _pid_alive(pid):
+            break
+        time.sleep(0.5)
+    forced = False
+    if _pid_alive(pid):
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+            forced = True
+        except Exception:
+            pass
+    _PIPELINE_PID_FILE.unlink(missing_ok=True)
+    with _pipeline_lock:
+        _pipeline_state.update({"popen": None, "started_at": None, "command": None})
+    return jsonify({"ok": True, "message": f"Pipeline stopped{' (forced)' if forced else ''}", "pid": pid})
+
+
+@app.route("/api/pipeline/run-single", methods=["POST"])
+def pipeline_run_single():
+    running, pid = _pipeline_running()
+    if running:
+        return jsonify({"ok": False, "error": f"Continuous pipeline running (pid {pid})"}), 409
+    with _pipeline_lock:
+        if _pipeline_state["single_round_running"]:
+            return jsonify({"ok": False, "error": "A single round is already running"}), 409
+        _pipeline_state["single_round_running"] = True
+
+    def worker():
+        try:
+            proc = _spawn_pipeline("single-round")
+            proc.wait()
+        except Exception as e:
+            logger.error("single_round_failed", error=str(e))
+        finally:
+            with _pipeline_lock:
+                _pipeline_state["single_round_running"] = False
+
+    threading.Thread(target=worker, daemon=True).start()
+    return jsonify({"ok": True, "message": "Single round started"})
+
+
+@app.route("/api/pipeline/logs")
+def pipeline_logs():
+    lines = max(10, min(2000, request.args.get("lines", 200, type=int)))
+    if not _PIPELINE_LOG_FILE.exists():
+        return jsonify({"lines": [], "log_file": str(_PIPELINE_LOG_FILE), "exists": False})
+    try:
+        with open(_PIPELINE_LOG_FILE, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            chunk = min(size, 256 * 1024)
+            f.seek(size - chunk)
+            buf = f.read().decode("utf-8", errors="replace")
+        tail = deque(buf.splitlines(), maxlen=lines)
+        return jsonify({"lines": list(tail), "log_file": str(_PIPELINE_LOG_FILE), "exists": True, "size_bytes": size})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/pipeline/export-qa", methods=["POST"])
+def pipeline_export_qa():
+    payload = request.get_json(silent=True) or {}
+    fmt = payload.get("format", "jsonl")
+    if fmt not in ("jsonl", "json", "huggingface"):
+        return jsonify({"ok": False, "error": "format must be 'jsonl', 'json', or 'huggingface'"}), 400
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    out_dir = _PROJECT_ROOT / "data" / "qa_output"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ext = "jsonl" if fmt in ("jsonl", "huggingface") else "json"
+    out_path = out_dir / f"qa_export_{ts}_{fmt}.{ext}"
+
+    def worker():
+        try:
+            log_fh = open(_PIPELINE_LOG_FILE, "a", buffering=1, encoding="utf-8")
+            log_fh.write(f"\n=== {datetime.now(timezone.utc).isoformat()} export-qa → {out_path} ===\n")
+            subprocess.run(
+                [sys.executable, "-m", "src.main", "export-qa", "--output", str(out_path), "--format", fmt],
+                cwd=str(_PROJECT_ROOT), stdout=log_fh, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL, check=False,
+            )
+        except Exception as e:
+            logger.error("qa_export_failed", error=str(e))
+
+    threading.Thread(target=worker, daemon=True).start()
+    return jsonify({"ok": True, "message": "Export started; check scrape loop logs.", "output_path": str(out_path)})
+
+
+# =============================================================================
+# Q/A-only pipeline (legacy endpoint — kept for backward compat)
+# =============================================================================
+
+@app.route("/api/qa/pipeline/status")
+def qa_pipeline_status():
+    s = _qa_loop_mgr.status()
+    return jsonify({"running": s["running"], "pid": s["pid"], "started_at": s["started_at"]})
+
+
+@app.route("/api/qa/pipeline/start", methods=["POST"])
+def qa_pipeline_start():
+    result = _qa_loop_mgr.start("qa-loop")
+    code = 409 if not result["ok"] and "already running" in result.get("error", "") else (500 if not result["ok"] else 200)
+    return jsonify(result), code
+
+
+@app.route("/api/qa/pipeline/stop", methods=["POST"])
+def qa_pipeline_stop():
+    result = _qa_loop_mgr.stop(15)
+    code = 409 if not result["ok"] else 200
+    return jsonify(result), code
+
+
+# =============================================================================
 # Errors & runner
 # =============================================================================
 
@@ -696,7 +1332,7 @@ def server_error(e):
 
 
 def run_dashboard(config: Optional[dict] = None, host: str = "0.0.0.0",
-                  port: int = 5000, debug: bool = False):
+                  port: int = 5050, debug: bool = False):
     if config is None:
         config = load_config("config/settings.yaml")
     configure(config)

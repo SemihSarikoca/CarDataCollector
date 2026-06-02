@@ -9,7 +9,7 @@ Sürekli çalışır, turlar halinde tekrar eder.
 import asyncio
 import signal
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from src.cache import RedisManager
@@ -18,11 +18,6 @@ from src.dedup import DeduplicationEngine
 from src.models import PipelineStage, RoundStats, SourceConfig, SourceType
 from src.qa_generator import QAGenerator
 from src.scrapers.base_scraper import BaseScraper
-from src.scrapers.sources.donanimhaber import DonanimHaberScraper
-from src.scrapers.sources.technopat import TechnopatScraper
-from src.scrapers.sources.shiftdelete import ShiftDeleteScraper
-from src.scrapers.sources.sekizsilindir import SekizSilindirScraper
-from src.scrapers.sources.otopark import OtoparkScraper
 from src.scrapers.sources.generic import GenericContentScraper, GenericForumScraper
 from src.scrapers.sources.reddit_api import RedditAPIScraper
 from src.scrapers.sources.nhtsa_api import NHTSAAPIScraper
@@ -34,13 +29,15 @@ logger = get_logger("orchestrator")
 
 # Kaynak adı → özel scraper eşleşmesi
 CUSTOM_SCRAPERS = {
-    "donanimhaber_otomobil": DonanimHaberScraper,
-    "technopat_otomobil": TechnopatScraper,
-    "shiftdelete_otomobil": ShiftDeleteScraper,
-    "sekizsilindir": SekizSilindirScraper,
-    "otopark": OtoparkScraper,
     "reddit_mechanicadvice": RedditAPIScraper,
     "reddit_cartalk": RedditAPIScraper,
+    "reddit_justrolledintotheshop": RedditAPIScraper,
+    "reddit_wrenching": RedditAPIScraper,
+    "reddit_automechanic": RedditAPIScraper,
+    "reddit_cars": RedditAPIScraper,
+    "reddit_askmechanics": RedditAPIScraper,
+    "reddit_trucks": RedditAPIScraper,
+    "reddit_diyauto": RedditAPIScraper,
     "nhtsa": NHTSAAPIScraper,
 }
 
@@ -89,6 +86,9 @@ class PipelineOrchestrator:
         await self.cache.initialize()
         await self.storage.initialize()
         await self._sync_sources_to_db()
+        cleaned = await self.db.cleanup_stale_rounds()
+        if cleaned:
+            logger.info("stale_rounds_cleaned", count=cleaned)
         self._current_round = await self.db.get_last_round_number()
         logger.info("orchestrator_initialized",
                    last_round=self._current_round,
@@ -124,24 +124,59 @@ class PipelineOrchestrator:
             return GenericContentScraper(source_config, self.config)
 
     def _get_enabled_sources(self) -> list[SourceConfig]:
-        """Aktif kaynakları önceliğe göre sıralı getir"""
         sources = []
         for src_dict in self.config.get("sources", []):
             if src_dict.get("enabled", True):
                 sources.append(SourceConfig(**src_dict))
-
-        # Önceliğe göre sırala (düşük = yüksek öncelik)
         sources.sort(key=lambda s: s.priority)
         return sources
 
+    async def _get_due_sources(self) -> list[SourceConfig]:
+        """Return enabled sources whose scrape_interval_hours has elapsed since last run.
+
+        Uses the DB as the authoritative source for the `enabled` flag so that
+        dashboard toggles take effect without a pipeline restart.
+        """
+        all_sources = self._get_enabled_sources()
+        if not all_sources:
+            return []
+
+        # Filter by DB-authoritative enabled state (dashboard may have toggled them)
+        db_states = await self.db.get_source_enabled_states([s.name for s in all_sources])
+        all_sources = [s for s in all_sources if db_states.get(s.name, True)]
+        if not all_sources:
+            return []
+
+        names = [s.name for s in all_sources]
+        last_scrape_times = await self.db.get_last_scrape_times(names)
+
+        now = datetime.now(timezone.utc)
+        due, skipped = [], []
+        for source in all_sources:
+            last = last_scrape_times.get(source.name)
+            if last is None:
+                due.append(source)
+            else:
+                next_due = last + timedelta(hours=source.scrape_interval_hours)
+                if now >= next_due:
+                    due.append(source)
+                else:
+                    wait_mins = int((next_due - now).total_seconds() / 60)
+                    skipped.append((source.name, wait_mins))
+
+        if skipped:
+            logger.info("sources_skipped_not_due",
+                        count=len(skipped),
+                        sources=[{"name": n, "ready_in_minutes": m} for n, m in skipped])
+        return due
+
     async def _scrape_source(self, source_config: SourceConfig, round_number: int) -> dict:
-        """Tek bir kaynağı scrape et"""
         stats = {"source": source_config.name, "items": 0, "stored": 0, "errors": 0}
+        log_id = await self.db.log_scrape_start(source_config.name, round_number)
         scraper = self._create_scraper(source_config)
 
         try:
-            logger.info("source_scrape_start", source=source_config.name,
-                       round=round_number)
+            logger.info("source_scrape_start", source=source_config.name, round=round_number)
 
             async for item in scraper.run():
                 try:
@@ -152,14 +187,16 @@ class PipelineOrchestrator:
                 except Exception as e:
                     stats["errors"] += 1
                     logger.error("store_error", source=source_config.name,
-                               url=item.page_url, error=str(e))
+                                 url=item.page_url, error=str(e))
 
             logger.info("source_scrape_complete", **stats)
 
         except Exception as e:
             stats["errors"] += 1
-            logger.error("source_scrape_failed", source=source_config.name,
-                        error=str(e))
+            logger.error("source_scrape_failed", source=source_config.name, error=str(e))
+
+        finally:
+            await self.db.log_scrape_complete(log_id, stats)
 
         return stats
 
@@ -175,13 +212,13 @@ class PipelineOrchestrator:
             "sources_completed": [],
         }
 
-        sources = self._get_enabled_sources()
+        sources = await self._get_due_sources()
         if not sources:
-            logger.warning("no_enabled_sources")
+            logger.info("no_sources_due", round=round_number)
             return round_stats
 
         logger.info("scrape_round_start", round=round_number,
-                   source_count=len(sources))
+                    source_count=len(sources))
 
         # Eşzamanlılık kontrolü
         semaphore = asyncio.Semaphore(self.max_concurrent_scrapers)
@@ -228,7 +265,13 @@ class PipelineOrchestrator:
         return stats
 
     async def run_single_round(self) -> RoundStats:
-        """Tam bir pipeline turu çalıştır"""
+        """Run a full pipeline round.
+
+        Scraping and Q/A generation run in parallel:
+        - Scraping fetches new documents from sources.
+        - Q/A processes documents that were already pending from previous rounds.
+        - Dedup runs after scraping finishes to clean up the newly stored documents.
+        """
         self._current_round += 1
         round_number = self._current_round
 
@@ -236,20 +279,32 @@ class PipelineOrchestrator:
         await self.db.start_round(round_number)
 
         try:
-            # Aşama 1: Scrape
-            scrape_stats = await self.run_scrape_round(round_number)
-            round_stats.total_items_scraped = scrape_stats["total_items"]
-            round_stats.total_items_stored = scrape_stats["total_stored"]
-            round_stats.errors_count = scrape_stats["total_errors"]
-            round_stats.sources_completed = scrape_stats["sources_completed"]
+            # Stage 1 + 3 in parallel: scrape new data AND generate Q/A on existing pending docs
+            scrape_task = asyncio.create_task(self.run_scrape_round(round_number))
+            qa_task     = asyncio.create_task(self.run_qa_round())
 
-            # Aşama 2: Batch dedup (scrape sırasında zaten yapılıyor ama ek kontrol)
+            results = await asyncio.gather(scrape_task, qa_task, return_exceptions=True)
+            scrape_stats, qa_result = results
+
+            if isinstance(scrape_stats, Exception):
+                raise scrape_stats
+
+            round_stats.total_items_scraped  = scrape_stats["total_items"]
+            round_stats.total_items_stored   = scrape_stats["total_stored"]
+            round_stats.errors_count         = scrape_stats["total_errors"]
+            round_stats.sources_completed    = scrape_stats["sources_completed"]
+
+            if isinstance(qa_result, Exception):
+                logger.error("qa_parallel_failed", round=round_number, error=str(qa_result))
+                qa_stats = {}
+            else:
+                qa_stats = qa_result
+
+            round_stats.total_qa_generated = qa_stats.get("qa_generated", 0)
+
+            # Stage 2: dedup runs after scraping so new documents are included
             dedup_stats = await self.run_dedup_round()
             round_stats.total_duplicates_found = dedup_stats.get("duplicates_found", 0)
-
-            # Aşama 3: Q/A Üretimi
-            qa_stats = await self.run_qa_round()
-            round_stats.total_qa_generated = qa_stats.get("qa_generated", 0)
 
             round_stats.status = "completed"
 
@@ -257,7 +312,7 @@ class PipelineOrchestrator:
             round_stats.status = "failed"
             logger.error("round_failed", round=round_number, error=str(e))
 
-        round_stats.end_time = datetime.utcnow()
+        round_stats.end_time = datetime.now(timezone.utc)
         await self.db.complete_round(round_number, round_stats)
 
         # İstatistikleri logla
@@ -277,6 +332,88 @@ class PipelineOrchestrator:
 
         return round_stats
 
+    async def run_scrape_only_continuous(self):
+        """Scrape-only 7/24 loop — fetches + stores + deduplicates, no Q/A generation."""
+        self._running = True
+        self._start_time = time.time()
+
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, lambda: self._shutdown())
+
+        logger.info("scrape_loop_started", round_delay=self.round_delay)
+
+        while self._running:
+            try:
+                self._current_round += 1
+                round_number = self._current_round
+                await self.db.start_round(round_number)
+
+                scrape_stats = await self.run_scrape_round(round_number)
+                dedup_stats = await self.run_dedup_round()
+
+                round_stats = RoundStats(round_number=round_number)
+                round_stats.total_items_scraped = scrape_stats["total_items"]
+                round_stats.total_items_stored = scrape_stats["total_stored"]
+                round_stats.errors_count = scrape_stats["total_errors"]
+                round_stats.sources_completed = scrape_stats["sources_completed"]
+                round_stats.total_duplicates_found = dedup_stats.get("duplicates_found", 0)
+                round_stats.status = "completed"
+                round_stats.end_time = datetime.now(timezone.utc)
+                await self.db.complete_round(round_number, round_stats)
+
+                if not self._running:
+                    break
+
+                logger.info("scrape_loop_waiting", delay_seconds=self.round_delay)
+                await asyncio.sleep(self.round_delay)
+
+            except asyncio.CancelledError:
+                logger.info("scrape_loop_cancelled")
+                break
+            except Exception as e:
+                logger.error("scrape_loop_error", error=str(e))
+                if self.auto_restart:
+                    logger.info("scrape_loop_backoff", seconds=self.error_backoff)
+                    await asyncio.sleep(self.error_backoff)
+                else:
+                    break
+
+        await self._cleanup()
+
+    async def run_qa_only_continuous(self):
+        """Q/A-only 7/24 loop — continuously processes pending documents through Ollama."""
+        self._running = True
+        self._start_time = time.time()
+
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, lambda: self._shutdown())
+
+        logger.info("qa_loop_started", min_docs=self.min_docs_for_qa)
+
+        while self._running:
+            try:
+                stats = await self.run_qa_round()
+
+                if not self._running:
+                    break
+
+                if stats.get("skipped"):
+                    await asyncio.sleep(60)
+                elif not stats.get("qa_generated"):
+                    await asyncio.sleep(30)
+                # else: loop immediately for next batch
+
+            except asyncio.CancelledError:
+                logger.info("qa_loop_cancelled")
+                break
+            except Exception as e:
+                logger.error("qa_loop_error", error=str(e))
+                await asyncio.sleep(self.error_backoff)
+
+        await self._cleanup()
+
     async def run_continuous(self):
         """
         Sürekli pipeline döngüsü - 7/24 çalışır.
@@ -285,8 +422,7 @@ class PipelineOrchestrator:
         self._running = True
         self._start_time = time.time()
 
-        # Graceful shutdown sinyalleri
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, lambda: self._shutdown())
 

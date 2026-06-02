@@ -39,10 +39,13 @@ class QAGenerator:
         self.max_qa_per_doc = qa_config.get("max_qa_per_document", 20)
         self.min_qa_per_doc = qa_config.get("min_qa_per_document", 3)
         self.temperature = qa_config.get("temperature", 0.3)
-        self.max_tokens = qa_config.get("max_tokens", 4096)
+        self.max_tokens = qa_config.get("max_tokens", 2048)
+        self.max_context_chars = qa_config.get("max_context_chars", 8000)
         self.system_prompt = qa_config.get("system_prompt", self._default_system_prompt())
+        self.concurrency = max(1, int(qa_config.get("concurrency", 2)))
 
-        self._client = httpx.AsyncClient(timeout=300)  # 5 dakika timeout
+        timeout_seconds = qa_config.get("request_timeout_seconds", 120)
+        self._client = httpx.AsyncClient(timeout=timeout_seconds)
         self._active_model = self.model_name
         self._total_generated = 0
         self._total_failed = 0
@@ -59,6 +62,18 @@ Rules:
 4. Include make, model, year if mentioned
 5. Focus on specific technical details, not general information
 6. Return as JSON array: [{"question": "...", "answer": "..."}]"""
+
+    def _truncate_to_context(self, text: str) -> str:
+        if len(text) <= self.max_context_chars:
+            return text
+        window = text[:self.max_context_chars]
+        # Walk sentence boundaries from longest to shortest separator
+        for sep in ("\n\n", ". ", "? ", "! ", "\n"):
+            pos = window.rfind(sep)
+            # Only accept a cut that keeps at least half the window
+            if pos > self.max_context_chars // 2:
+                return window[: pos + len(sep)].rstrip()
+        return window.rstrip()
 
     async def check_ollama_health(self) -> bool:
         """Ollama API sağlık kontrolü"""
@@ -91,14 +106,10 @@ Rules:
         Metin için Q/A çiftleri üret.
         Returns: [{"question": "...", "answer": "..."}, ...]
         """
-        # Metin çok kısaysa atla
         if not text or len(text) < 100:
             return []
 
-        # Metin çok uzunsa kes (LLM context limiti)
-        max_chars = 8000
-        if len(text) > max_chars:
-            text = text[:max_chars] + "\n...[metin kesildi]"
+        text = self._truncate_to_context(text)
 
         # Extract car info
         car_info = extract_car_info(text)
@@ -187,94 +198,102 @@ Return JSON only, no other text."""
             logger.warning("json_parse_error", error=str(e), text_preview=text[:200])
             return []
 
-    async def process_batch(self) -> dict:
-        """
-        Hazır dökümanları toplu işle, Q/A üret.
-        """
-        stats = {"processed": 0, "qa_generated": 0, "failed": 0}
+    async def _process_single_doc(self, doc: dict, semaphore: asyncio.Semaphore) -> dict:
+        """Process one document: fetch text, run Ollama, insert Q/A pairs."""
+        result = {"processed": 0, "qa_generated": 0, "failed": 0}
+        try:
+            text = doc.get("content_text") or ""
+            if (not text or len(text) < 100) and doc.get("file_path_html"):
+                text = await self.storage.get_document_text(doc["file_path_html"])
 
-        # Ollama kontrolü
-        if not await self.check_ollama_health():
-            logger.error("ollama_not_ready_skipping_batch")
-            return stats
+            if not text or len(text) < 100:
+                return result
 
-        # İşlenecek dökümanları getir
-        documents = await self.db.get_documents_for_qa(limit=self.batch_size)
-        if not documents:
-            logger.info("no_documents_for_qa")
-            return stats
+            quality = estimate_content_quality(text)
+            if quality < 0.3:
+                logger.debug("low_quality_skipped", doc_id=doc["id"], quality=quality)
+                return result
 
-        logger.info("qa_batch_start", count=len(documents))
+            # extract_car_info once; pass into generate so the prompt also benefits
+            car_info = extract_car_info(text)
 
-        for doc in documents:
-            try:
-                # Önce DB'den content_text'i kullan, yoksa dosyadan oku
-                text = doc.get("content_text") or ""
-                if (not text or len(text) < 100) and doc.get("file_path_html"):
-                    text = await self.storage.get_document_text(doc["file_path_html"])
-
-                if not text or len(text) < 100:
-                    continue
-
-                # Kalite kontrolü
-                quality = estimate_content_quality(text)
-                if quality < 0.3:
-                    logger.debug("low_quality_skipped", doc_id=doc["id"], quality=quality)
-                    continue
-
-                # Q/A üret
+            async with semaphore:
                 qa_dicts = await self.generate_qa_for_text(
                     text,
                     source_name=doc.get("source_name", ""),
                     title=doc.get("title", ""),
                 )
 
-                if qa_dicts and len(qa_dicts) >= self.min_qa_per_doc:
-                    # Model olarak kaydet
-                    car_info = extract_car_info(text)
+            if qa_dicts and len(qa_dicts) >= self.min_qa_per_doc:
+                qa_pairs = [
+                    QAPair(
+                        document_id=doc["id"],
+                        source_name=doc.get("source_name", ""),
+                        question=qa["question"],
+                        answer=qa["answer"],
+                        car_brand=car_info.get("brand", ""),
+                        car_model=car_info.get("model", ""),
+                        car_year=car_info.get("year", ""),
+                        quality_score=quality,
+                        model_used=self._active_model,
+                    )
+                    for qa in qa_dicts
+                ]
+                inserted = await self.db.insert_qa_pairs(qa_pairs)
+                result["qa_generated"] = inserted
+                result["processed"] = 1
+                self._total_generated += inserted
+                logger.info("qa_generated", doc_id=doc["id"],
+                            title=doc.get("title", "")[:40], count=inserted)
+            else:
+                result["failed"] = 1
+                self._total_failed += 1
+        except Exception as e:
+            result["failed"] = 1
+            self._total_failed += 1
+            logger.error("qa_process_error", doc_id=doc.get("id"), error=str(e))
+        return result
 
-                    qa_pairs = []
-                    for qa in qa_dicts:
-                        pair = QAPair(
-                            document_id=doc["id"],
-                            source_name=doc.get("source_name", ""),
-                            question=qa["question"],
-                            answer=qa["answer"],
-                            car_brand=car_info.get("brand", ""),
-                            car_model=car_info.get("model", ""),
-                            car_year=car_info.get("year", ""),
-                            quality_score=quality,
-                            model_used=self._active_model,
-                        )
-                        qa_pairs.append(pair)
+    async def process_batch(self) -> dict:
+        """Process pending documents concurrently up to `self.concurrency` Ollama calls."""
+        stats = {"processed": 0, "qa_generated": 0, "failed": 0}
 
-                    inserted = await self.db.insert_qa_pairs(qa_pairs)
-                    stats["qa_generated"] += inserted
-                    self._total_generated += inserted
-                    stats["processed"] += 1
+        if not await self.check_ollama_health():
+            logger.error("ollama_not_ready_skipping_batch")
+            return stats
 
-                    logger.info("qa_generated", doc_id=doc["id"],
-                               title=doc.get("title", "")[:40],
-                               count=inserted)
-                else:
-                    stats["failed"] += 1
-                    self._total_failed += 1
+        documents = await self.db.get_documents_for_qa(limit=self.batch_size)
+        if not documents:
+            logger.info("no_documents_for_qa")
+            return stats
 
-                # Aşırı yüklemeyi önle
-                await asyncio.sleep(1)
+        logger.info("qa_batch_start", count=len(documents), concurrency=self.concurrency)
 
-            except Exception as e:
+        semaphore = asyncio.Semaphore(self.concurrency)
+        results = await asyncio.gather(
+            *[self._process_single_doc(doc, semaphore) for doc in documents],
+            return_exceptions=True,
+        )
+
+        for r in results:
+            if isinstance(r, Exception):
                 stats["failed"] += 1
                 self._total_failed += 1
-                logger.error("qa_process_error", doc_id=doc.get("id"), error=str(e))
+                logger.error("qa_task_exception", error=str(r))
+            else:
+                stats["processed"] += r["processed"]
+                stats["qa_generated"] += r["qa_generated"]
+                stats["failed"] += r["failed"]
 
         logger.info("qa_batch_complete", **stats)
         return stats
 
     async def export_all_qa(self, output_path: str, format: str = "jsonl") -> int:
         """
-        Tüm Q/A çiftlerini dosyaya dışa aktar.
-        Formats: jsonl, json
+        Export all Q/A pairs to file.
+        Formats: jsonl, json, huggingface
+          - jsonl/json: flat records with question/answer/metadata fields
+          - huggingface: chat-format {"messages": [{"role": "user", ...}, {"role": "assistant", ...}]}
         """
         import aiofiles
 
@@ -293,23 +312,31 @@ Return JSON only, no other text."""
                     break
 
                 for pair in pairs:
-                    qa_record = {
-                        "question": pair["question"],
-                        "answer": pair["answer"],
-                        "source": pair["source_name"],
-                        "car_brand": pair.get("car_brand", ""),
-                        "car_model": pair.get("car_model", ""),
-                        "car_year": pair.get("car_year", ""),
-                        "quality_score": pair.get("quality_score", 0),
-                        "model_used": pair.get("model_used", ""),
-                    }
+                    if format == "huggingface":
+                        record = {
+                            "messages": [
+                                {"role": "user", "content": pair["question"]},
+                                {"role": "assistant", "content": pair["answer"]},
+                            ]
+                        }
+                    else:
+                        record = {
+                            "question": pair["question"],
+                            "answer": pair["answer"],
+                            "source": pair["source_name"],
+                            "car_brand": pair.get("car_brand", ""),
+                            "car_model": pair.get("car_model", ""),
+                            "car_year": pair.get("car_year", ""),
+                            "quality_score": pair.get("quality_score", 0),
+                            "model_used": pair.get("model_used", ""),
+                        }
 
-                    if format == "jsonl":
-                        await f.write(json.dumps(qa_record, ensure_ascii=False) + "\n")
+                    if format in ("jsonl", "huggingface"):
+                        await f.write(json.dumps(record, ensure_ascii=False) + "\n")
                     elif format == "json":
                         if not first:
                             await f.write(",\n")
-                        await f.write("  " + json.dumps(qa_record, ensure_ascii=False))
+                        await f.write("  " + json.dumps(record, ensure_ascii=False))
                         first = False
 
                     total_exported += 1

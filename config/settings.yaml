@@ -13,7 +13,7 @@ general:
   log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
   log_dir: "logs"
   max_workers: 4  # Concurrent scraper count
-  round_delay_seconds: 43200  # 12 hours between rounds
+  round_delay_seconds: 300  # 5 minutes between rounds (heartbeat; sources use their own scrape_interval_hours)
   politeness_delay_seconds: 3  # Delay between requests
   request_timeout_seconds: 60
   max_retries: 3
@@ -44,7 +44,8 @@ storage:
   qa_output_dir: "qa_output"
   temp_dir: "temp"
   max_file_size_mb: 50
-  disk_warning_threshold_percent: 90
+  disk_warning_threshold_percent: 97
+  disk_minimum_free_gb: 2
 
 # -----------------------------------------------------------------------------
 # Database Settings (PostgreSQL via asyncpg)
@@ -144,15 +145,18 @@ quality:
 # Q/A Generator (LLM) Settings
 # -----------------------------------------------------------------------------
 qa_generator:
-  model: "gemma12b"
+  model: "gemma3-4b"
   ollama_url: "http://ollama:11434"
-  ollama_model_name: "gemma3:12b"
-  fallback_model_name: "qwen2.5:14b"
-  batch_size: 5
-  max_qa_per_document: 20
+  ollama_model_name: "gemma3:4b"
+  fallback_model_name: "gemma3:12b"
+  batch_size: 20
+  max_qa_per_document: 10
   min_qa_per_document: 3
   temperature: 0.3
-  max_tokens: 4096
+  max_tokens: 2048
+  max_context_chars: 8000
+  request_timeout_seconds: 120  # per-request; gemma3:4b on M2 responds in 20-90s
+  concurrency: 2  # concurrent Ollama requests; eliminates idle time between calls
   system_prompt: |
     You are an automotive technical expert. From the given English automotive
     technical text or forum discussion, generate high-quality question-answer
@@ -371,7 +375,7 @@ sources:
     category: "complaints"
     priority: 1
     rate_limit: 1.0
-    scrape_interval_hours: 168  # weekly — NHTSA data does not change rapidly
+    scrape_interval_hours: 168
     max_pages_per_round: 200
     use_playwright: false
     cloudflare_protected: false
@@ -380,26 +384,87 @@ sources:
       # Each vehicle yields up to 3 documents (complaints / recalls / investigations).
       # Add or replace as needed.
       vehicles:
-        - {make: Toyota,    model: Camry,     year: 2018}
-        - {make: Toyota,    model: Corolla,   year: 2019}
-        - {make: Toyota,    model: RAV4,      year: 2020}
-        - {make: Honda,     model: Civic,     year: 2018}
-        - {make: Honda,     model: Accord,    year: 2019}
-        - {make: Honda,     model: CR-V,      year: 2020}
-        - {make: Ford,      model: F-150,     year: 2018}
-        - {make: Ford,      model: Escape,    year: 2019}
-        - {make: Ford,      model: Explorer,  year: 2020}
-        - {make: Chevrolet, model: Silverado, year: 2018}
-        - {make: Chevrolet, model: Equinox,   year: 2019}
-        - {make: Nissan,    model: Altima,    year: 2018}
-        - {make: Nissan,    model: Rogue,     year: 2019}
-        - {make: Hyundai,   model: Elantra,   year: 2018}
-        - {make: Hyundai,   model: Sonata,    year: 2019}
-        - {make: Kia,       model: Optima,    year: 2018}
-        - {make: Subaru,    model: Outback,   year: 2019}
-        - {make: Jeep,      model: Wrangler,  year: 2018}
-        - {make: BMW,       model: 328i,      year: 2014}
-        - {make: Volkswagen,model: Jetta,     year: 2018}
+        - {make: Toyota,    model: Camry,       year: 2018}
+        - {make: Toyota,    model: Camry,       year: 2020}
+        - {make: Toyota,    model: Camry,       year: 2022}
+        - {make: Toyota,    model: Corolla,     year: 2019}
+        - {make: Toyota,    model: Corolla,     year: 2021}
+        - {make: Toyota,    model: RAV4,        year: 2020}
+        - {make: Toyota,    model: RAV4,        year: 2022}
+        - {make: Toyota,    model: Tacoma,      year: 2019}
+        - {make: Toyota,    model: Tacoma,      year: 2021}
+        - {make: Toyota,    model: Highlander,  year: 2020}
+        - {make: Toyota,    model: Prius,       year: 2018}
+        - {make: Toyota,    model: Tundra,      year: 2022}
+        - {make: Honda,     model: Civic,       year: 2018}
+        - {make: Honda,     model: Civic,       year: 2021}
+        - {make: Honda,     model: Accord,      year: 2019}
+        - {make: Honda,     model: Accord,      year: 2022}
+        - {make: Honda,     model: CR-V,        year: 2020}
+        - {make: Honda,     model: CR-V,        year: 2022}
+        - {make: Honda,     model: Pilot,       year: 2019}
+        - {make: Honda,     model: Odyssey,     year: 2018}
+        - {make: Ford,      model: F-150,       year: 2018}
+        - {make: Ford,      model: F-150,       year: 2021}
+        - {make: Ford,      model: Escape,      year: 2019}
+        - {make: Ford,      model: Escape,      year: 2021}
+        - {make: Ford,      model: Explorer,    year: 2020}
+        - {make: Ford,      model: Explorer,    year: 2022}
+        - {make: Ford,      model: Mustang,     year: 2019}
+        - {make: Ford,      model: Bronco,      year: 2021}
+        - {make: Ford,      model: Edge,        year: 2019}
+        - {make: Chevrolet, model: Silverado,   year: 2018}
+        - {make: Chevrolet, model: Silverado,   year: 2021}
+        - {make: Chevrolet, model: Equinox,     year: 2019}
+        - {make: Chevrolet, model: Equinox,     year: 2021}
+        - {make: Chevrolet, model: Malibu,      year: 2018}
+        - {make: Chevrolet, model: Traverse,    year: 2019}
+        - {make: Chevrolet, model: Tahoe,       year: 2020}
+        - {make: Nissan,    model: Altima,      year: 2018}
+        - {make: Nissan,    model: Altima,      year: 2021}
+        - {make: Nissan,    model: Rogue,       year: 2019}
+        - {make: Nissan,    model: Rogue,       year: 2021}
+        - {make: Nissan,    model: Sentra,      year: 2020}
+        - {make: Nissan,    model: Pathfinder,  year: 2019}
+        - {make: Hyundai,   model: Elantra,     year: 2018}
+        - {make: Hyundai,   model: Elantra,     year: 2021}
+        - {make: Hyundai,   model: Sonata,      year: 2019}
+        - {make: Hyundai,   model: Sonata,      year: 2021}
+        - {make: Hyundai,   model: Tucson,      year: 2020}
+        - {make: Hyundai,   model: Santa Fe,    year: 2019}
+        - {make: Kia,       model: Optima,      year: 2018}
+        - {make: Kia,       model: Sorento,     year: 2019}
+        - {make: Kia,       model: Sportage,    year: 2020}
+        - {make: Kia,       model: Telluride,   year: 2020}
+        - {make: Subaru,    model: Outback,     year: 2019}
+        - {make: Subaru,    model: Outback,     year: 2021}
+        - {make: Subaru,    model: Forester,    year: 2019}
+        - {make: Subaru,    model: Crosstrek,   year: 2020}
+        - {make: Jeep,      model: Wrangler,    year: 2018}
+        - {make: Jeep,      model: Wrangler,    year: 2021}
+        - {make: Jeep,      model: Grand Cherokee, year: 2019}
+        - {make: Jeep,      model: Cherokee,    year: 2018}
+        - {make: BMW,       model: 328i,        year: 2014}
+        - {make: BMW,       model: 530i,        year: 2018}
+        - {make: BMW,       model: X5,          year: 2019}
+        - {make: BMW,       model: 3 Series,    year: 2020}
+        - {make: Volkswagen, model: Jetta,      year: 2018}
+        - {make: Volkswagen, model: Jetta,      year: 2021}
+        - {make: Volkswagen, model: Tiguan,     year: 2019}
+        - {make: Volkswagen, model: Atlas,      year: 2020}
+        - {make: Mercedes-Benz, model: C300,    year: 2018}
+        - {make: Mercedes-Benz, model: E350,    year: 2019}
+        - {make: Dodge,     model: Ram 1500,    year: 2019}
+        - {make: Dodge,     model: Charger,     year: 2018}
+        - {make: Ram,       model: 1500,        year: 2019}
+        - {make: Ram,       model: 1500,        year: 2021}
+        - {make: GMC,       model: Sierra,      year: 2019}
+        - {make: GMC,       model: Terrain,     year: 2019}
+        - {make: Mazda,     model: CX-5,        year: 2019}
+        - {make: Mazda,     model: Mazda3,      year: 2019}
+        - {make: Lexus,     model: RX350,       year: 2018}
+        - {make: Audi,      model: A4,          year: 2019}
+        - {make: Audi,      model: Q5,          year: 2019}
 
   # =========================================================================
   # SPECS & REVIEWS
@@ -469,6 +534,389 @@ sources:
       answer_content: "div.answer-body"
       pagination_next: "a.next"
 
+  # =========================================================================
+  # FORUMS - Additional Reddit subreddits
+  # =========================================================================
+  - name: "reddit_justrolledintotheshop"
+    type: "forum"
+    enabled: true
+    base_url: "https://www.reddit.com"
+    start_urls:
+      - "https://www.reddit.com/r/Justrolledintotheshop/top/?t=all"
+      - "https://www.reddit.com/r/Justrolledintotheshop/new/"
+    category: "forum"
+    priority: 1
+    rate_limit: 2.0
+    scrape_interval_hours: 6
+    max_pages_per_round: 200
+    use_playwright: false
+    cloudflare_protected: false
+    selectors: {}
+
+  - name: "reddit_wrenching"
+    type: "forum"
+    enabled: true
+    base_url: "https://www.reddit.com"
+    start_urls:
+      - "https://www.reddit.com/r/wrenching/top/?t=all"
+      - "https://www.reddit.com/r/wrenching/new/"
+    category: "forum"
+    priority: 1
+    rate_limit: 2.0
+    scrape_interval_hours: 6
+    max_pages_per_round: 200
+    use_playwright: false
+    cloudflare_protected: false
+    selectors: {}
+
+  - name: "reddit_automechanic"
+    type: "forum"
+    enabled: true
+    base_url: "https://www.reddit.com"
+    start_urls:
+      - "https://www.reddit.com/r/AutoMechanic/top/?t=all"
+      - "https://www.reddit.com/r/AutoMechanic/new/"
+    category: "forum"
+    priority: 1
+    rate_limit: 2.0
+    scrape_interval_hours: 6
+    max_pages_per_round: 200
+    use_playwright: false
+    cloudflare_protected: false
+    selectors: {}
+
+  - name: "reddit_cars"
+    type: "forum"
+    enabled: true
+    base_url: "https://www.reddit.com"
+    start_urls:
+      - "https://www.reddit.com/r/cars/top/?t=all"
+      - "https://www.reddit.com/r/cars/new/"
+    category: "forum"
+    priority: 2
+    rate_limit: 2.0
+    scrape_interval_hours: 8
+    max_pages_per_round: 200
+    use_playwright: false
+    cloudflare_protected: false
+    selectors: {}
+
+  # =========================================================================
+  # TECHNICAL - OBD Codes & Diagnostics
+  # =========================================================================
+  - name: "obd_codes"
+    type: "technical"
+    enabled: true
+    base_url: "https://obd-codes.com"
+    start_urls:
+      - "https://obd-codes.com/trouble_codes/"
+    category: "technical"
+    priority: 1
+    rate_limit: 4.0
+    scrape_interval_hours: 168
+    max_pages_per_round: 300
+    use_playwright: false
+    cloudflare_protected: false
+    selectors:
+      article_list: "a[href*='/p/']"
+      article_title: "h1"
+      article_content: "div#content, div.content, article"
+      pagination_next: "a.next, a[rel='next']"
+
+  - name: "autocodes"
+    type: "technical"
+    enabled: true
+    base_url: "https://www.autocodes.com"
+    start_urls:
+      - "https://www.autocodes.com/obd2_codes.html"
+    category: "technical"
+    priority: 1
+    rate_limit: 4.0
+    scrape_interval_hours: 168
+    max_pages_per_round: 400
+    use_playwright: false
+    cloudflare_protected: false
+    selectors:
+      article_list: "a[href*='code-']"
+      article_title: "h1"
+      article_content: "div#main-content, div.content-area, main"
+      pagination_next: "a.next"
+
+  # =========================================================================
+  # FORUMS - Additional automotive forums
+  # =========================================================================
+  - name: "thecarconnection"
+    type: "content"
+    enabled: true
+    base_url: "https://www.thecarconnection.com"
+    start_urls:
+      - "https://www.thecarconnection.com/news/"
+      - "https://www.thecarconnection.com/car-reviews/"
+    category: "content"
+    priority: 3
+    rate_limit: 5.0
+    scrape_interval_hours: 24
+    max_pages_per_round: 200
+    use_playwright: false
+    cloudflare_protected: false
+    selectors:
+      article_list: "a.article-title, h3 a, h2 a"
+      article_title: "h1"
+      article_content: "div.article-body, div.content, article"
+      article_date: "time"
+      pagination_next: "a.next, a[rel='next']"
+
+  - name: "automd"
+    type: "technical"
+    enabled: true
+    base_url: "https://www.automd.com"
+    start_urls:
+      - "https://www.automd.com/repair-guides/"
+    category: "technical"
+    priority: 2
+    rate_limit: 5.0
+    scrape_interval_hours: 48
+    max_pages_per_round: 300
+    use_playwright: true
+    cloudflare_protected: false
+    selectors:
+      article_list: "a[href*='/repair-guide/']"
+      article_title: "h1"
+      article_content: "div.guide-content, div.repair-content, main"
+      pagination_next: "a.next"
+
+  - name: "vehiclehistory"
+    type: "technical"
+    enabled: false
+    base_url: "https://www.vehiclehistory.com"
+    start_urls:
+      - "https://www.vehiclehistory.com/articles/"
+    category: "technical"
+    priority: 3
+    rate_limit: 4.0
+    scrape_interval_hours: 48
+    max_pages_per_round: 200
+    use_playwright: false
+    cloudflare_protected: false
+    selectors:
+      article_list: "h2 a, h3 a, a.article-link"
+      article_title: "h1"
+      article_content: "div.article-content, div.entry-content, article"
+      article_date: "time"
+      pagination_next: "a.next, a[rel='next']"
+
+  # =========================================================================
+  # FORUMS - Additional Reddit subreddits
+  # =========================================================================
+  - name: "reddit_askmechanics"
+    type: "forum"
+    enabled: true
+    base_url: "https://www.reddit.com"
+    start_urls:
+      - "https://www.reddit.com/r/AskMechanics/top/?t=all"
+      - "https://www.reddit.com/r/AskMechanics/new/"
+    category: "forum"
+    priority: 1
+    rate_limit: 2.0
+    scrape_interval_hours: 6
+    max_pages_per_round: 200
+    use_playwright: false
+    cloudflare_protected: false
+    selectors: {}
+
+  - name: "reddit_trucks"
+    type: "forum"
+    enabled: true
+    base_url: "https://www.reddit.com"
+    start_urls:
+      - "https://www.reddit.com/r/Trucks/top/?t=all"
+      - "https://www.reddit.com/r/Trucks/new/"
+    category: "forum"
+    priority: 2
+    rate_limit: 2.0
+    scrape_interval_hours: 8
+    max_pages_per_round: 200
+    use_playwright: false
+    cloudflare_protected: false
+    selectors: {}
+
+  - name: "reddit_diyauto"
+    type: "forum"
+    enabled: true
+    base_url: "https://www.reddit.com"
+    start_urls:
+      - "https://www.reddit.com/r/diyauto/top/?t=all"
+      - "https://www.reddit.com/r/diyauto/new/"
+    category: "forum"
+    priority: 2
+    rate_limit: 2.0
+    scrape_interval_hours: 8
+    max_pages_per_round: 200
+    use_playwright: false
+    cloudflare_protected: false
+    selectors: {}
+
+  # =========================================================================
+  # FORUMS - Model-specific communities
+  # =========================================================================
+  - name: "tacomaworld"
+    type: "forum"
+    enabled: true
+    base_url: "https://www.tacomaworld.com"
+    start_urls:
+      - "https://www.tacomaworld.com/forums/tacoma-problems-maintenance-and-repair.html"
+      - "https://www.tacomaworld.com/forums/3rd-gen-tacomas.html"
+    category: "forum"
+    priority: 2
+    rate_limit: 5.0
+    scrape_interval_hours: 12
+    max_pages_per_round: 300
+    use_playwright: false
+    cloudflare_protected: false
+    selectors:
+      thread_list: "a.structItem-title"
+      thread_title: "h1.p-title-value"
+      post_content: ".message-body .bbWrapper"
+      post_author: "a.username"
+      post_date: "time.u-dt"
+      pagination_next: "a.pageNav-jump--next"
+
+  - name: "jeepforum"
+    type: "forum"
+    enabled: true
+    base_url: "https://www.jeepforum.com"
+    start_urls:
+      - "https://www.jeepforum.com/forums/wrangler-jl-general-discussion.html"
+      - "https://www.jeepforum.com/forums/jeep-cherokee-general-discussion.html"
+    category: "forum"
+    priority: 2
+    rate_limit: 5.0
+    scrape_interval_hours: 12
+    max_pages_per_round: 300
+    use_playwright: true
+    cloudflare_protected: true
+    selectors:
+      thread_list: "a.structItem-title"
+      thread_title: "h1.p-title-value"
+      post_content: ".message-body .bbWrapper"
+      post_author: "a.username"
+      post_date: "time.u-dt"
+      pagination_next: "a.pageNav-jump--next"
+
+  - name: "toyotanation"
+    type: "forum"
+    enabled: true
+    base_url: "https://www.toyotanation.com"
+    start_urls:
+      - "https://www.toyotanation.com/forums/camry-maintenance-and-repair.html"
+      - "https://www.toyotanation.com/forums/corolla-maintenance-and-repair.html"
+      - "https://www.toyotanation.com/forums/rav4-maintenance-and-repair.html"
+    category: "forum"
+    priority: 2
+    rate_limit: 5.0
+    scrape_interval_hours: 12
+    max_pages_per_round: 300
+    use_playwright: true
+    cloudflare_protected: true
+    selectors:
+      thread_list: "a.structItem-title"
+      thread_title: "h1.p-title-value"
+      post_content: ".message-body .bbWrapper"
+      post_author: "a.username"
+      post_date: "time.u-dt"
+      pagination_next: "a.pageNav-jump--next"
+
+  - name: "f150forum"
+    type: "forum"
+    enabled: true
+    base_url: "https://www.f150forum.com"
+    start_urls:
+      - "https://www.f150forum.com/f110/"
+      - "https://www.f150forum.com/f128/"
+    category: "forum"
+    priority: 2
+    rate_limit: 5.0
+    scrape_interval_hours: 12
+    max_pages_per_round: 300
+    use_playwright: true
+    cloudflare_protected: true
+    selectors:
+      thread_list: "a.structItem-title"
+      thread_title: "h1.p-title-value"
+      post_content: ".message-body .bbWrapper"
+      post_author: "a.username"
+      post_date: "time.u-dt"
+      pagination_next: "a.pageNav-jump--next"
+
+  # =========================================================================
+  # TECHNICAL / CONTENT
+  # =========================================================================
+  - name: "motor1"
+    type: "content"
+    enabled: true
+    base_url: "https://www.motor1.com"
+    start_urls:
+      - "https://www.motor1.com/news/"
+      - "https://www.motor1.com/features/"
+    category: "content"
+    priority: 3
+    rate_limit: 4.0
+    scrape_interval_hours: 24
+    max_pages_per_round: 200
+    use_playwright: false
+    cloudflare_protected: false
+    selectors:
+      article_list: "h3 a, h2 a, .listing-post a.title"
+      article_title: "h1"
+      article_content: "div.articleBody, div.content-body, article"
+      article_date: "time"
+      pagination_next: "a[rel='next'], a.pagination-next"
+
+  - name: "mechanicbase"
+    type: "technical"
+    enabled: true
+    base_url: "https://mechanicbase.com"
+    start_urls:
+      - "https://mechanicbase.com/cars/"
+      - "https://mechanicbase.com/engine/"
+      - "https://mechanicbase.com/transmission/"
+      - "https://mechanicbase.com/brakes/"
+    category: "technical"
+    priority: 1
+    rate_limit: 4.0
+    scrape_interval_hours: 48
+    max_pages_per_round: 400
+    use_playwright: false
+    cloudflare_protected: false
+    selectors:
+      article_list: "h2.entry-title a, h3.entry-title a, .post-title a"
+      article_title: "h1.entry-title, h1"
+      article_content: "div.entry-content, div.post-content, article"
+      article_date: "time"
+      pagination_next: "a.next, a[rel='next']"
+
+  - name: "fixd_blog"
+    type: "technical"
+    enabled: true
+    base_url: "https://www.fixdapp.com"
+    start_urls:
+      - "https://www.fixdapp.com/blog/car-symptoms/"
+      - "https://www.fixdapp.com/blog/obd2-codes/"
+      - "https://www.fixdapp.com/blog/car-repair/"
+    category: "technical"
+    priority: 1
+    rate_limit: 4.0
+    scrape_interval_hours: 48
+    max_pages_per_round: 300
+    use_playwright: false
+    cloudflare_protected: false
+    selectors:
+      article_list: "h2 a, h3 a, .post-title a, .entry-title a"
+      article_title: "h1.entry-title, h1"
+      article_content: "div.entry-content, div.post-content, article"
+      article_date: "time"
+      pagination_next: "a.next, a[rel='next']"
+
 # -----------------------------------------------------------------------------
 # Pipeline Settings
 # -----------------------------------------------------------------------------
@@ -484,7 +932,7 @@ pipeline:
     - name: "quality_check"
       enabled: true
     - name: "generate_qa"
-      enabled: true
+      enabled: false
       min_documents_to_start: 100
 
   auto_restart: true
@@ -497,19 +945,19 @@ pipeline:
 dashboard:
   enabled: true
   host: "0.0.0.0"
-  port: 5000
+  port: 5050
   debug: false
-  # Auto-refresh interval in seconds
   refresh_interval: 30
+  # Set a token here or via DASHBOARD_TOKEN env var to enable login protection.
+  # Leave empty to disable auth (local-only use).
+  token: ""
 
 # -----------------------------------------------------------------------------
 # Monitoring
 # -----------------------------------------------------------------------------
 monitoring:
   stats_interval: 300
-  prometheus_enabled: true
-  prometheus_port: 9090
-  # Webhook notifications (Discord, Slack, etc.)
+# Webhook notifications (Discord, Slack, etc.)
   webhook_url: ""
   # Email alerts
   email_enabled: false

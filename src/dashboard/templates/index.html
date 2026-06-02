@@ -978,15 +978,16 @@ a:hover { text-decoration: underline; }
   <!-- Topbar -->
   <header class="topbar">
     <span id="pipelinePill" class="pill bad"><span class="dot"></span>Pipeline</span>
+    <span id="pausedPill" class="pill warn" style="display:none;"><span class="dot"></span>Paused</span>
     <span id="pgPill"     class="pill bad"><span class="dot"></span>Postgres</span>
     <span id="redisPill"  class="pill bad"><span class="dot"></span>Redis</span>
     <span id="ollamaPill" class="pill bad"><span class="dot"></span>Ollama</span>
     <span class="topbar-spacer"></span>
-    <button class="topbar-stop" id="topbarStopScrape" onclick="scrapeStop()" title="Stop scrape loop">
-      <i class="bi bi-stop-fill"></i> Stop Scrape
+    <button class="topbar-stop show" id="topbarPauseBtn" onclick="pipelinePause()" title="Pause pipeline after current round">
+      <i class="bi bi-pause-fill"></i> Pause
     </button>
-    <button class="topbar-stop" id="topbarStopQA" onclick="qaLoopStop()" title="Stop Q/A loop">
-      <i class="bi bi-stop-fill"></i> Stop Q/A
+    <button class="topbar-stop" id="topbarResumeBtn" onclick="pipelineResume()" title="Resume pipeline" style="background:rgba(34,197,94,0.15);border-color:rgba(34,197,94,0.35);color:#4ade80;">
+      <i class="bi bi-play-fill"></i> Resume
     </button>
     <span class="topbar-time" id="lastUpdate">—</span>
     <button class="icon-btn" onclick="refreshAll()" title="Refresh"><i class="bi bi-arrow-clockwise"></i></button>
@@ -1139,34 +1140,7 @@ a:hover { text-decoration: underline; }
         <div class="qa-stat"><div class="label">Avg Quality</div><div class="value" id="qaAvgQuality">—</div></div>
       </div>
 
-      <!-- Q/A Pipeline Control -->
-      <div class="card" style="margin-bottom:16px;">
-        <div class="card-head">
-          <span class="card-title"><i class="bi bi-cpu"></i> Q/A Pipeline</span>
-          <span id="qaPipelineStatusPill" class="pill bad"><span class="dot"></span>Idle</span>
-        </div>
-        <div class="card-body">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <div style="font-size:11.5px;color:var(--text-3);line-height:1.5;flex:1;min-width:200px;">
-              Process all pending documents through Ollama and generate Q/A pairs.
-              Runs until every eligible document is processed.
-            </div>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <label style="font-size:11px;color:var(--text-3);">Batch:</label>
-              <input type="number" id="qaPipelineBatch" value="5" min="1" max="50" style="width:65px;">
-              <button class="btn btn-green" id="qaPipelineStartBtn" onclick="qaPipelineStart()">
-                <i class="bi bi-play-fill"></i> Run All Pending
-              </button>
-              <button class="btn btn-red" id="qaPipelineStopBtn" onclick="qaPipelineStop()" disabled>
-                <i class="bi bi-stop-fill"></i> Stop
-              </button>
-            </div>
-          </div>
-          <div class="banner" id="qaPipelineBanner" style="margin-top:10px;"></div>
-        </div>
-      </div>
-
-      <!-- Quick generate (small batch) -->
+      <!-- Q/A generate card -->
       <div class="card">
         <div class="card-head">
           <span class="card-title"><i class="bi bi-chat-square-dots"></i> Q/A Pairs</span>
@@ -1178,10 +1152,10 @@ a:hover { text-decoration: underline; }
         </div>
         <div id="qaJobBanner" class="banner" style="margin:10px 14px 0;"></div>
         <div style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;">
-          <label style="font-size:11px;color:var(--text-3);">Quick generate (small batch):</label>
+          <label style="font-size:11px;color:var(--text-3);">Generate a small batch now:</label>
           <input type="number" id="qaBatchSize" value="5" min="1" max="50" style="width:65px;">
           <button class="btn btn-ghost" id="qaGenerateBtn" onclick="triggerQA()" style="padding:5px 10px;font-size:11px;">
-            <i class="bi bi-play-fill"></i> Generate Batch
+            <i class="bi bi-play-fill"></i> Run Batch
           </button>
         </div>
         <div class="qa-list" id="qaList">
@@ -1229,7 +1203,30 @@ a:hover { text-decoration: underline; }
     <!-- ══ PIPELINE ══ -->
     <section id="pipeline" class="section">
       <div class="section-header">
-        <div><div class="section-title">Pipeline Control</div><div class="section-sub">Separate scraping and Q/A generation processes</div></div>
+        <div><div class="section-title">Pipeline Control</div><div class="section-sub">Pause/resume the running collector, or start separate scraping/Q/A loops</div></div>
+      </div>
+
+      <!-- Pause / Resume (works for Docker-managed pipeline) -->
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-head">
+          <span class="card-title"><i class="bi bi-toggles"></i> Pipeline Pause / Resume</span>
+          <span id="pauseStatusPill" class="pill ok"><span class="dot"></span>Running</span>
+        </div>
+        <div class="card-body">
+          <div style="font-size:11.5px;color:var(--text-3);line-height:1.6;margin-bottom:14px;">
+            Pausing sets a Redis flag — the running pipeline finishes its current round then waits.
+            Works for both the Docker-managed collector and dashboard-spawned loops.
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-red" id="pauseBtn" onclick="pipelinePause()">
+              <i class="bi bi-pause-fill"></i> Pause Pipeline
+            </button>
+            <button class="btn btn-green" id="resumeBtn" onclick="pipelineResume()" disabled>
+              <i class="bi bi-play-fill"></i> Resume Pipeline
+            </button>
+          </div>
+          <div class="banner" id="pauseBanner"></div>
+        </div>
       </div>
 
       <div class="pipeline-grid">
@@ -1410,7 +1407,7 @@ function showSection(name) {
   const nav = document.querySelector(`.nav-item[data-section="${name}"]`);
   if (nav) nav.classList.add('active');
 
-  if (name === 'pipeline') { fetchPipelineStatus(); fetchQAPipelineStatus(); fetchLogs(); }
+  if (name === 'pipeline') { fetchPipelineStatus(); fetchQAPipelineStatus(); fetchPauseStatus(); fetchLogs(); }
   if (name === 'system')   fetchSystem();
   if (name === 'sources')  fetchSources();
   if (name === 'documents'){ fetchDocs(1); }
@@ -1450,7 +1447,7 @@ async function refreshAll() {
     fetchStats(), fetchSources(), fetchDocs(docPage),
     fetchTrends(), fetchDistribution(), fetchQA(qaPage),
     fetchQAStats(), fetchRounds(), fetchSystem(),
-    fetchScrapeStatus(), fetchQALoopStatus(),
+    fetchScrapeStatus(), fetchQALoopStatus(), fetchPauseStatus(),
   ]);
   if ($('logsAutoRefresh')?.checked) fetchLogs();
   $('lastUpdate').textContent = 'Updated ' + new Date().toLocaleTimeString();
@@ -1801,6 +1798,56 @@ function updateTopPill(id, ok, label) {
   el.innerHTML = `<span class="dot"></span>${label}`;
 }
 
+// ══ Pipeline Pause / Resume ══════════════════════════
+async function fetchPauseStatus() {
+  try {
+    const s = await fetch('/api/pipeline/paused').then(r => r.json());
+    const paused = s.paused;
+    const pill      = $('pauseStatusPill');
+    const pausedPill = $('pausedPill');
+    const pauseBtn  = $('pauseBtn');
+    const resumeBtn = $('resumeBtn');
+    const topPause  = $('topbarPauseBtn');
+    const topResume = $('topbarResumeBtn');
+    const ppPill    = $('pipelinePill');
+
+    if (paused) {
+      if (pill)      { pill.className = 'pill warn'; pill.innerHTML = '<span class="dot"></span>Paused'; }
+      if (pausedPill) pausedPill.style.display = 'inline-flex';
+      if (pauseBtn)  pauseBtn.disabled = true;
+      if (resumeBtn) resumeBtn.disabled = false;
+      if (topPause)  topPause.style.display = 'none';
+      if (topResume) topResume.classList.add('show');
+      if (ppPill)    { ppPill.className = 'pill warn'; ppPill.innerHTML = '<span class="dot"></span>Paused'; }
+    } else {
+      if (pill)      { pill.className = 'pill ok'; pill.innerHTML = '<span class="dot"></span>Running'; }
+      if (pausedPill) pausedPill.style.display = 'none';
+      if (pauseBtn)  pauseBtn.disabled = false;
+      if (resumeBtn) resumeBtn.disabled = true;
+      if (topPause)  topPause.classList.add('show');
+      if (topResume) topResume.classList.remove('show');
+    }
+  } catch(e) {}
+}
+
+async function pipelinePause() {
+  try {
+    const r = await fetch('/api/pipeline/pause', { method: 'POST' });
+    const d = await r.json();
+    showBanner('pauseBanner', d.ok ? 'warn' : 'error', d.message || d.error || '');
+    setTimeout(fetchPauseStatus, 400);
+  } catch(e) { showBanner('pauseBanner', 'error', e.message); }
+}
+
+async function pipelineResume() {
+  try {
+    const r = await fetch('/api/pipeline/resume', { method: 'POST' });
+    const d = await r.json();
+    showBanner('pauseBanner', d.ok ? 'success' : 'error', d.message || d.error || '');
+    setTimeout(fetchPauseStatus, 400);
+  } catch(e) { showBanner('pauseBanner', 'error', e.message); }
+}
+
 // ══ Scrape Loop ═════════════════════════════════════
 async function fetchScrapeStatus() {
   try {
@@ -1812,8 +1859,6 @@ async function fetchScrapeStatus() {
     const pp    = $('pipelinePill');
     const startBtn = $('scrapeStartBtn');
     const stopBtn  = $('scrapeStopBtn');
-    const topStop  = $('topbarStopScrape');
-
     if (s.running) {
       dot.className = 'status-dot dot-amber';
       label.textContent = `Running  PID ${s.pid}`;
@@ -1822,7 +1867,6 @@ async function fetchScrapeStatus() {
       pill.innerHTML = `<span class="dot"></span>Running`;
       if (pp) { pp.className = 'pill ok running'; pp.innerHTML = `<span class="dot"></span>Scraping`; }
       startBtn.disabled = true; stopBtn.disabled = false;
-      if (topStop) topStop.classList.add('show');
     } else {
       dot.className = 'status-dot dot-gray';
       label.textContent = 'Stopped';
@@ -1830,7 +1874,6 @@ async function fetchScrapeStatus() {
       pill.className = 'pill bad';
       pill.innerHTML = `<span class="dot"></span>Idle`;
       startBtn.disabled = false; stopBtn.disabled = true;
-      if (topStop) topStop.classList.remove('show');
     }
   } catch(e) {}
 }
@@ -1868,29 +1911,20 @@ async function fetchQALoopStatus() {
     const pill  = $('qaLoopPill');
     const startBtn = $('qaLoopStartBtn');
     const stopBtn  = $('qaLoopStopBtn');
-    const topStop  = $('topbarStopQA');
-
-    // Also update Q/A section pill if present
-    const qaSectionPill = $('qaPipelineStatusPill');
-
     if (s.running) {
       dot.className = 'status-dot dot-amber';
       label.textContent = `Running  PID ${s.pid}`;
       meta.textContent  = `started ${fmtDate(s.started_at)}`;
       pill.className = 'pill ok running';
       pill.innerHTML = `<span class="dot"></span>Running`;
-      if (qaSectionPill) { qaSectionPill.className = 'pill ok running'; qaSectionPill.innerHTML = `<span class="dot"></span>Running PID ${s.pid}`; }
       startBtn.disabled = true; stopBtn.disabled = false;
-      if (topStop) topStop.classList.add('show');
     } else {
       dot.className = 'status-dot dot-gray';
       label.textContent = 'Stopped';
       meta.textContent  = 'Generates Q/A pairs via Ollama continuously';
       pill.className = 'pill bad';
       pill.innerHTML = `<span class="dot"></span>Idle`;
-      if (qaSectionPill) { qaSectionPill.className = 'pill bad'; qaSectionPill.innerHTML = `<span class="dot"></span>Idle`; }
       startBtn.disabled = false; stopBtn.disabled = true;
-      if (topStop) topStop.classList.remove('show');
     }
   } catch(e) {}
 }

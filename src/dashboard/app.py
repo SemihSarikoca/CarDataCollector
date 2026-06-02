@@ -100,8 +100,11 @@ def configure(config: dict):
         _state["pool"] = None
 
     try:
-        _state["redis_client"] = redis.Redis.from_url(redis_url, decode_responses=True,
-                                                       socket_timeout=2)
+        _state["redis_client"] = redis.Redis.from_url(
+            redis_url, decode_responses=True,
+            socket_timeout=5, socket_connect_timeout=5,
+            retry_on_timeout=True,
+        )
         _state["redis_client"].ping()
         logger.info("dashboard_redis_ready")
     except Exception as e:
@@ -1138,6 +1141,51 @@ def qa_loop_logs():
 
 
 # =============================================================================
+# Redis-based pipeline pause / resume (works for Docker-managed pipeline)
+# =============================================================================
+
+_PIPELINE_PAUSE_KEY = "pipeline:paused"
+
+
+@app.route("/api/pipeline/paused")
+def pipeline_pause_status():
+    rc = _state["redis_client"]
+    if not rc:
+        return jsonify({"paused": False, "redis": False})
+    try:
+        paused = bool(rc.get(_PIPELINE_PAUSE_KEY))
+        return jsonify({"paused": paused, "redis": True})
+    except Exception as e:
+        return jsonify({"paused": False, "redis": False, "error": str(e)})
+
+
+@app.route("/api/pipeline/pause", methods=["POST"])
+def pipeline_pause():
+    rc = _state["redis_client"]
+    if not rc:
+        return jsonify({"ok": False, "error": "Redis not available"}), 503
+    try:
+        rc.set(_PIPELINE_PAUSE_KEY, "1")
+        logger.info("pipeline_paused_via_dashboard")
+        return jsonify({"ok": True, "message": "Pipeline paused — current round will finish, next round will wait"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/pipeline/resume", methods=["POST"])
+def pipeline_resume():
+    rc = _state["redis_client"]
+    if not rc:
+        return jsonify({"ok": False, "error": "Redis not available"}), 503
+    try:
+        rc.delete(_PIPELINE_PAUSE_KEY)
+        logger.info("pipeline_resumed_via_dashboard")
+        return jsonify({"ok": True, "message": "Pipeline resumed"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# =============================================================================
 # Pipeline process control (legacy — kept for backward compat)
 # =============================================================================
 
@@ -1167,12 +1215,20 @@ def pipeline_status():
     meta = _read_pid_meta()
     with _pipeline_lock:
         single = _pipeline_state["single_round_running"]
+    rc = _state["redis_client"]
+    paused = False
+    if rc:
+        try:
+            paused = bool(rc.get(_PIPELINE_PAUSE_KEY))
+        except Exception:
+            pass
     return jsonify({
         "running": running,
         "pid": pid,
         "command": meta.get("command"),
         "started_at": meta.get("started_at"),
         "single_round_running": single,
+        "paused": paused,
         "log_file": str(_PIPELINE_LOG_FILE),
     })
 

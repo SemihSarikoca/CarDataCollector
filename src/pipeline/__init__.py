@@ -332,6 +332,27 @@ class PipelineOrchestrator:
 
         return round_stats
 
+    _PAUSE_KEY = "pipeline:paused"
+
+    async def _is_paused(self) -> bool:
+        if not self.cache.connected:
+            return False
+        try:
+            return bool(await self.cache._client.get(self._PAUSE_KEY))
+        except Exception:
+            return False
+
+    async def _wait_while_paused(self):
+        """Block until the Redis pause flag is cleared."""
+        first = True
+        while self._running and await self._is_paused():
+            if first:
+                logger.info("pipeline_paused")
+                first = False
+            await asyncio.sleep(5)
+        if not first:
+            logger.info("pipeline_resumed")
+
     async def run_scrape_only_continuous(self):
         """Scrape-only 7/24 loop — fetches + stores + deduplicates, no Q/A generation."""
         self._running = True
@@ -345,6 +366,9 @@ class PipelineOrchestrator:
 
         while self._running:
             try:
+                await self._wait_while_paused()
+                if not self._running:
+                    break
                 self._current_round += 1
                 round_number = self._current_round
                 await self.db.start_round(round_number)
@@ -394,6 +418,9 @@ class PipelineOrchestrator:
 
         while self._running:
             try:
+                await self._wait_while_paused()
+                if not self._running:
+                    break
                 stats = await self.run_qa_round()
 
                 if not self._running:
@@ -432,6 +459,10 @@ class PipelineOrchestrator:
 
         while self._running:
             try:
+                await self._wait_while_paused()
+                if not self._running:
+                    break
+
                 round_stats = await self.run_single_round()
 
                 if not self._running:

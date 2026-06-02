@@ -23,6 +23,10 @@ services:
       - REDIS_URL=redis://redis:6379/0
       # Ollama (running natively on host for Metal GPU access)
       - OLLAMA_URL=http://host.docker.internal:11434
+      # Reddit OAuth - create app at https://www.reddit.com/prefs/apps (type: script)
+      # Leave empty to use unauthenticated JSON API (may get 403 from some IPs)
+      - REDDIT_CLIENT_ID=
+      - REDDIT_CLIENT_SECRET=
     depends_on:
       postgres:
         condition: service_healthy

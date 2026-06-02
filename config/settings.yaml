@@ -474,8 +474,8 @@ sources:
     enabled: true
     base_url: "https://www.motortrend.com"
     start_urls:
-      - "https://www.motortrend.com/how-to/"
-      - "https://www.motortrend.com/features/"
+      - "https://www.motortrend.com/news/"
+      - "https://www.motortrend.com/reviews/"
     category: "content"
     priority: 3
     rate_limit: 5.0
@@ -484,11 +484,11 @@ sources:
     use_playwright: true
     cloudflare_protected: true
     selectors:
-      article_list: "a.article-card"
-      article_title: "h1.article-title"
-      article_content: "div.article-body"
+      article_list: "h2 a, h3 a, a[href*='/news/'], a[href*='/reviews/']"
+      article_title: "h1"
+      article_content: "div.article-body, div.article-content, article"
       article_date: "time"
-      pagination_next: "a.next"
+      pagination_next: "a.next, a[rel='next']"
 
   - name: "caranddriver"
     type: "content"
@@ -496,7 +496,7 @@ sources:
     base_url: "https://www.caranddriver.com"
     start_urls:
       - "https://www.caranddriver.com/features/"
-      - "https://www.caranddriver.com/columns/"
+      - "https://www.caranddriver.com/how-to/"
     category: "content"
     priority: 3
     rate_limit: 5.0
@@ -505,18 +505,18 @@ sources:
     use_playwright: true
     cloudflare_protected: true
     selectors:
-      article_list: "a.article-link"
+      article_list: "a[href*='/features/'], a[href*='/how-to/'], a[href*='/columns/']"
       article_title: "h1"
-      article_content: "article"
+      article_content: "div.article-body"
       article_date: "time"
-      pagination_next: "a.next"
+      pagination_next: "a.next, a[rel='next']"
 
   # =========================================================================
   # Q&A SITES
   # =========================================================================
   - name: "2carpros"
     type: "qa"
-    enabled: true
+    enabled: false  # login wall - questions redirect to sign-in page
     base_url: "https://www.2carpros.com"
     start_urls:
       - "https://www.2carpros.com/questions"
@@ -615,12 +615,12 @@ sources:
     rate_limit: 4.0
     scrape_interval_hours: 168
     max_pages_per_round: 300
-    use_playwright: false
+    use_playwright: true
     cloudflare_protected: false
     selectors:
-      article_list: "a[href*='/p/']"
+      article_list: "a[href*='/p/'], td a, .code-list a"
       article_title: "h1"
-      article_content: "div#content, div.content, article"
+      article_content: "div#content, div.content, article, main"
       pagination_next: "a.next, a[rel='next']"
 
   - name: "autocodes"
@@ -634,13 +634,13 @@ sources:
     rate_limit: 4.0
     scrape_interval_hours: 168
     max_pages_per_round: 400
-    use_playwright: false
+    use_playwright: true
     cloudflare_protected: false
     selectors:
-      article_list: "a[href*='code-']"
+      article_list: "a[href*='code-'], td a, .code-list a"
       article_title: "h1"
-      article_content: "div#main-content, div.content-area, main"
-      pagination_next: "a.next"
+      article_content: "div#main-content, div.content-area, main, article"
+      pagination_next: "a.next, a[rel='next']"
 
   # =========================================================================
   # FORUMS - Additional automotive forums
@@ -657,10 +657,10 @@ sources:
     rate_limit: 5.0
     scrape_interval_hours: 24
     max_pages_per_round: 200
-    use_playwright: false
+    use_playwright: true
     cloudflare_protected: false
     selectors:
-      article_list: "a.article-title, h3 a, h2 a"
+      article_list: "h3 a, h2 a, a[href*='/news/'], a[href*='/car-reviews/']"
       article_title: "h1"
       article_content: "div.article-body, div.content, article"
       article_date: "time"
@@ -764,8 +764,9 @@ sources:
     enabled: true
     base_url: "https://www.tacomaworld.com"
     start_urls:
-      - "https://www.tacomaworld.com/forums/tacoma-problems-maintenance-and-repair.html"
-      - "https://www.tacomaworld.com/forums/3rd-gen-tacomas.html"
+      - "https://www.tacomaworld.com/forums/3rd-gen-tacomas-2016-2023.186/"
+      - "https://www.tacomaworld.com/forums/2nd-gen-tacomas-2005-2015.5/"
+      - "https://www.tacomaworld.com/forums/general-tacoma-talk.294/"
     category: "forum"
     priority: 2
     rate_limit: 5.0
@@ -774,20 +775,21 @@ sources:
     use_playwright: false
     cloudflare_protected: false
     selectors:
-      thread_list: "a.structItem-title"
-      thread_title: "h1.p-title-value"
-      post_content: ".message-body .bbWrapper"
+      thread_list: "h3.title a, a.PreviewTooltip"
+      thread_title: "h1.titleBar, h1"
+      post_content: "blockquote.messageText, .messageContent"
       post_author: "a.username"
-      post_date: "time.u-dt"
-      pagination_next: "a.pageNav-jump--next"
+      post_date: "time, span.DateTime"
+      pagination_next: ".PageNav a.text"
 
   - name: "jeepforum"
     type: "forum"
     enabled: true
     base_url: "https://www.jeepforum.com"
     start_urls:
-      - "https://www.jeepforum.com/forums/wrangler-jl-general-discussion.html"
-      - "https://www.jeepforum.com/forums/jeep-cherokee-general-discussion.html"
+      - "https://www.jeepforum.com/forums/jl-wrangler-technical-forum.858/"
+      - "https://www.jeepforum.com/forums/jk-wrangler-technical-forum.96/"
+      - "https://www.jeepforum.com/forums/xj-cherokee-technical-forum.11/"
     category: "forum"
     priority: 2
     rate_limit: 5.0
@@ -808,9 +810,9 @@ sources:
     enabled: true
     base_url: "https://www.toyotanation.com"
     start_urls:
-      - "https://www.toyotanation.com/forums/camry-maintenance-and-repair.html"
-      - "https://www.toyotanation.com/forums/corolla-maintenance-and-repair.html"
-      - "https://www.toyotanation.com/forums/rav4-maintenance-and-repair.html"
+      - "https://www.toyotanation.com/forums/camry-8th-gen-2018-2024.802/"
+      - "https://www.toyotanation.com/forums/corolla-and-matrix-forum.133/"
+      - "https://www.toyotanation.com/forums/rav4-5th-gen-2019-2025.946/"
     category: "forum"
     priority: 2
     rate_limit: 5.0
@@ -831,8 +833,9 @@ sources:
     enabled: true
     base_url: "https://www.f150forum.com"
     start_urls:
-      - "https://www.f150forum.com/f110/"
-      - "https://www.f150forum.com/f128/"
+      - "https://www.f150forum.com/forums/general-f150-discussion.4/"
+      - "https://www.f150forum.com/forums/5-0l-v8-technical-discussion.15/"
+      - "https://www.f150forum.com/forums/f-150-engine-technical-discussion.82/"
     category: "forum"
     priority: 2
     rate_limit: 5.0
@@ -900,19 +903,19 @@ sources:
     enabled: true
     base_url: "https://www.fixdapp.com"
     start_urls:
-      - "https://www.fixdapp.com/blog/car-symptoms/"
-      - "https://www.fixdapp.com/blog/obd2-codes/"
-      - "https://www.fixdapp.com/blog/car-repair/"
+      - "https://www.fixdapp.com/blog/"
+      - "https://www.fixdapp.com/diy-repairs/"
+      - "https://www.fixdapp.com/obd2-codes/"
     category: "technical"
     priority: 1
     rate_limit: 4.0
     scrape_interval_hours: 48
     max_pages_per_round: 300
-    use_playwright: false
+    use_playwright: true
     cloudflare_protected: false
     selectors:
-      article_list: "h2 a, h3 a, .post-title a, .entry-title a"
-      article_title: "h1.entry-title, h1"
+      article_list: "h2.entry-title a, h2 a, h3 a"
+      article_title: "h1"
       article_content: "div.entry-content, div.post-content, article"
       article_date: "time"
       pagination_next: "a.next, a[rel='next']"

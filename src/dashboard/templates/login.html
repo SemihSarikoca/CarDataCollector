@@ -3,373 +3,231 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Car Data Collector — Access</title>
+<title>CarData — Access</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Barlow+Condensed:wght@300;400;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap');
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:        #0a0e1a;
-  --bg2:       #0d1120;
-  --surface:   rgba(255,255,255,0.035);
-  --border:    rgba(255,165,0,0.18);
-  --border-hi: rgba(255,165,0,0.55);
-  --amber:     #f59e0b;
-  --amber-dim: rgba(245,158,11,0.12);
-  --text:      #e8ecf4;
-  --text-dim:  #5a6380;
-  --error:     #ef4444;
-  --mono:      'JetBrains Mono', monospace;
-  --display:   'Barlow Condensed', sans-serif;
+  --bg:         #070809;
+  --surface:    rgba(255,255,255,0.03);
+  --border:     rgba(0,230,122,0.2);
+  --border-hi:  rgba(0,230,122,0.5);
+  --green:      #00e67a;
+  --green-dim:  rgba(0,230,122,0.08);
+  --text:       #e2e8f5;
+  --text-dim:   #3a4a60;
+  --error:      #ff2d54;
+  --display:    'Rajdhani', sans-serif;
+  --mono:       'JetBrains Mono', monospace;
 }
 
-html, body {
-  height: 100%;
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--mono);
-  overflow: hidden;
-}
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--mono); overflow: hidden; }
 
-/* ── Animated background ─────────────────────────────── */
-.bg-grid {
+.bg-dots {
   position: fixed; inset: 0; z-index: 0;
-  background-image:
-    linear-gradient(rgba(245,158,11,0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(245,158,11,0.04) 1px, transparent 1px);
-  background-size: 48px 48px;
-  animation: grid-drift 60s linear infinite;
+  background-image: radial-gradient(circle, rgba(0,230,122,0.07) 1px, transparent 1px);
+  background-size: 32px 32px;
+  animation: dots-drift 50s linear infinite;
 }
-@keyframes grid-drift {
+@keyframes dots-drift {
   0%   { background-position: 0 0; }
-  100% { background-position: 48px 48px; }
+  100% { background-position: 32px 32px; }
 }
 
-.bg-vignette {
+.bg-fade {
   position: fixed; inset: 0; z-index: 1;
-  background: radial-gradient(ellipse 80% 80% at 50% 50%,
-    transparent 30%, rgba(10,14,26,0.85) 100%);
+  background: radial-gradient(ellipse 75% 75% at 50% 50%, transparent 20%, var(--bg) 100%);
 }
 
 .bg-glow {
   position: fixed; z-index: 1;
-  width: 600px; height: 600px;
-  border-radius: 50%;
+  width: 520px; height: 520px;
   left: 50%; top: 50%;
   transform: translate(-50%, -50%);
-  background: radial-gradient(circle, rgba(245,158,11,0.07) 0%, transparent 70%);
-  animation: glow-breathe 6s ease-in-out infinite;
+  background: radial-gradient(circle, rgba(0,230,122,0.045) 0%, transparent 65%);
+  animation: breathe 8s ease-in-out infinite;
 }
-@keyframes glow-breathe {
-  0%,100% { opacity: 0.6; transform: translate(-50%,-50%) scale(1); }
-  50%      { opacity: 1;   transform: translate(-50%,-50%) scale(1.15); }
-}
-
-/* Sweep line */
-.bg-sweep {
-  position: fixed; inset: 0; z-index: 2; pointer-events: none;
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    rgba(245,158,11,0.025) 50%,
-    transparent 100%
-  );
-  background-size: 100% 200px;
-  animation: sweep 8s linear infinite;
-}
-@keyframes sweep {
-  0%   { background-position: 0 -200px; }
-  100% { background-position: 0 100vh; }
+@keyframes breathe {
+  0%, 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(1); }
+  50%       { opacity: 1;   transform: translate(-50%, -50%) scale(1.22); }
 }
 
-/* ── Layout ──────────────────────────────────────────── */
 .stage {
   position: relative; z-index: 10;
   height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  display: flex; align-items: center; justify-content: center;
   padding: 24px;
 }
 
-/* ── Card ────────────────────────────────────────────── */
 .card {
   width: 100%;
-  max-width: 400px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  padding: 40px 36px 36px;
+  max-width: 380px;
   position: relative;
-  backdrop-filter: blur(12px);
-  animation: card-in 0.7s cubic-bezier(0.16,1,0.3,1) both;
+  padding: 44px 40px 40px;
+  background: var(--surface);
+  border: 1px solid rgba(255,255,255,0.06);
+  backdrop-filter: blur(16px);
+  animation: card-up 0.55s cubic-bezier(0.16,1,0.3,1) both;
 }
-@keyframes card-in {
-  from { opacity: 0; transform: translateY(20px); }
+@keyframes card-up {
+  from { opacity: 0; transform: translateY(14px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* corner accents */
-.card::before, .card::after {
-  content: '';
-  position: absolute;
-  width: 12px; height: 12px;
-  border-color: var(--amber);
-  border-style: solid;
-}
-.card::before { top: -1px; left: -1px; border-width: 2px 0 0 2px; }
-.card::after  { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
+/* Four-corner bracket accents */
+.card::before { content: ''; position: absolute; top: -1px;    left: -1px;  width: 14px; height: 14px; border-top: 2px solid var(--green);    border-left: 2px solid var(--green); }
+.card::after  { content: ''; position: absolute; top: -1px;    right: -1px; width: 14px; height: 14px; border-top: 2px solid var(--green);    border-right: 2px solid var(--green); }
+.card-bl      { position: absolute; bottom: -1px; left: -1px;  width: 14px; height: 14px; border-bottom: 2px solid var(--green); border-left: 2px solid var(--green); }
+.card-br      { position: absolute; bottom: -1px; right: -1px; width: 14px; height: 14px; border-bottom: 2px solid var(--green); border-right: 2px solid var(--green); }
 
-/* inner scan line */
-.card-scan {
-  position: absolute; top: 0; left: 0; right: 0; height: 1px;
-  background: linear-gradient(90deg, transparent, var(--amber), transparent);
-  animation: scan-line 3s ease-in-out infinite;
-  opacity: 0.7;
+.scan {
+  position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--green), transparent);
+  animation: scan 3s ease-in-out infinite;
+  opacity: 0;
 }
-@keyframes scan-line {
-  0%,100% { opacity: 0; transform: scaleX(0); }
-  50%     { opacity: 0.7; transform: scaleX(1); }
+@keyframes scan {
+  0%   { opacity: 0; transform: scaleX(0.05); }
+  45%  { opacity: 0.9; transform: scaleX(1); }
+  85%  { opacity: 0; transform: scaleX(1); }
+  100% { opacity: 0; }
 }
 
-/* ── Header ──────────────────────────────────────────── */
-.header {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  margin-bottom: 32px;
-  gap: 12px;
+.hd {
+  display: flex; flex-direction: column; align-items: center;
+  margin-bottom: 36px; gap: 14px;
 }
 
-.icon-ring {
-  width: 52px; height: 52px;
-  border: 1px solid var(--border-hi);
-  border-radius: 2px;
+.logo-mark {
+  width: 56px; height: 56px;
+  border: 1.5px solid rgba(0,230,122,0.35);
+  background: var(--green-dim);
   display: flex; align-items: center; justify-content: center;
-  background: var(--amber-dim);
-  position: relative;
-  animation: icon-pulse 4s ease-in-out infinite;
+  animation: mark-pulse 5s ease-in-out infinite;
 }
-@keyframes icon-pulse {
-  0%,100% { box-shadow: 0 0 0 0 rgba(245,158,11,0); }
-  50%     { box-shadow: 0 0 0 8px rgba(245,158,11,0.08); }
+@keyframes mark-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0,230,122,0); }
+  50%       { box-shadow: 0 0 0 8px rgba(0,230,122,0.06); }
 }
-
-.icon-ring svg {
-  width: 24px; height: 24px;
-  stroke: var(--amber);
-  fill: none;
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+.logo-mark span {
+  font-family: var(--display);
+  font-size: 17px; font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--green);
 }
 
 .title {
-  font-family: var(--display);
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text);
-  text-align: center;
-  line-height: 1.1;
+  font-family: var(--display); font-size: 22px; font-weight: 700;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--text);
+  text-align: center; line-height: 1.1;
 }
-
 .subtitle {
-  font-size: 10px;
-  letter-spacing: 0.25em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  font-weight: 300;
+  font-size: 9px; letter-spacing: 0.3em; text-transform: uppercase;
+  color: var(--text-dim); margin-top: -6px; text-align: center;
 }
 
-/* ── Form ────────────────────────────────────────────── */
-.field {
-  margin-bottom: 20px;
-}
-
+.field { margin-bottom: 20px; }
 .field-label {
-  display: block;
-  font-size: 9px;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  margin-bottom: 8px;
+  display: block; font-family: var(--display); font-weight: 600;
+  font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--text-dim); margin-bottom: 8px;
 }
-
-.field-wrap {
-  position: relative;
-}
-
+.field-wrap { position: relative; }
 .field-wrap svg {
-  position: absolute;
-  left: 12px; top: 50%;
-  transform: translateY(-50%);
-  width: 14px; height: 14px;
-  stroke: var(--text-dim);
-  fill: none;
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  pointer-events: none;
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  width: 14px; height: 14px; stroke: var(--text-dim); fill: none;
+  stroke-width: 1.5; stroke-linecap: round; pointer-events: none;
 }
 
 input[type="password"] {
   width: 100%;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 2px;
-  color: var(--text);
-  font-family: var(--mono);
-  font-size: 13px;
-  letter-spacing: 0.12em;
-  padding: 11px 12px 11px 36px;
-  outline: none;
-  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
-  caret-color: var(--amber);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: var(--text); font-family: var(--mono); font-size: 13px;
+  letter-spacing: 0.1em; padding: 12px 12px 12px 36px;
+  outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+  caret-color: var(--green);
 }
-input[type="password"]::placeholder { color: var(--text-dim); letter-spacing: 0.05em; }
+input[type="password"]::placeholder { color: var(--text-dim); letter-spacing: 0.04em; }
 input[type="password"]:focus {
-  border-color: var(--border-hi);
-  background: rgba(245,158,11,0.06);
-  box-shadow: 0 0 0 3px rgba(245,158,11,0.08);
+  border-color: rgba(0,230,122,0.4);
+  box-shadow: 0 0 0 3px rgba(0,230,122,0.06);
 }
 
-/* ── Error ───────────────────────────────────────────── */
 .error-msg {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  color: var(--error);
-  background: rgba(239,68,68,0.08);
-  border: 1px solid rgba(239,68,68,0.25);
-  border-radius: 2px;
-  padding: 9px 12px;
-  margin-bottom: 20px;
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; color: var(--error);
+  background: rgba(255,45,84,0.07); border: 1px solid rgba(255,45,84,0.2);
+  padding: 9px 12px; margin-bottom: 18px;
   animation: err-in 0.3s ease both;
 }
-@keyframes err-in {
-  from { opacity: 0; transform: translateY(-6px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.error-msg svg {
-  width: 13px; height: 13px;
-  flex-shrink: 0;
-  stroke: var(--error);
-  fill: none; stroke-width: 2;
-  stroke-linecap: round;
-}
+@keyframes err-in { from { opacity:0; transform:translateY(-5px); } to { opacity:1; transform:none; } }
+.error-msg svg { width:13px; height:13px; flex-shrink:0; stroke:var(--error); fill:none; stroke-width:2; stroke-linecap:round; }
 
-/* ── Submit button ───────────────────────────────────── */
-.btn {
-  width: 100%;
-  background: var(--amber);
-  color: #0a0e1a;
-  border: none;
-  border-radius: 2px;
-  font-family: var(--display);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  padding: 13px;
-  cursor: pointer;
-  transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
-  position: relative;
-  overflow: hidden;
+.btn-submit {
+  width: 100%; background: var(--green); color: #040506;
+  border: none; font-family: var(--display); font-size: 13px;
+  font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase;
+  padding: 14px; cursor: pointer; position: relative; overflow: hidden;
+  transition: box-shadow 0.2s, transform 0.1s;
 }
-.btn::after {
-  content: '';
-  position: absolute; inset: 0;
-  background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, transparent 60%);
+.btn-submit::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.18) 0%, transparent 55%);
   pointer-events: none;
 }
-.btn:hover {
-  background: #fbbf24;
-  box-shadow: 0 0 20px rgba(245,158,11,0.35);
-}
-.btn:active { transform: scale(0.98); }
+.btn-submit:hover { box-shadow: 0 0 24px rgba(0,230,122,0.45), 0 0 52px rgba(0,230,122,0.14); }
+.btn-submit:active { transform: scale(0.99); }
 
-/* ── Footer ──────────────────────────────────────────── */
 .card-footer {
-  margin-top: 28px;
-  padding-top: 20px;
-  border-top: 1px solid rgba(255,255,255,0.06);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  margin-top: 28px; padding-top: 18px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+  display: flex; align-items: center; justify-content: space-between;
 }
-.badge-row {
-  display: flex;
-  gap: 8px;
-}
+.badge-row { display: flex; gap: 6px; }
 .badge {
-  font-size: 8px;
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 2px;
-  padding: 3px 6px;
+  font-size: 8px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text-dim); border: 1px solid rgba(255,255,255,0.07);
+  padding: 3px 6px; font-family: var(--display); font-weight: 600;
 }
 .status-dot {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: #22c55e;
-  box-shadow: 0 0 6px rgba(34,197,94,0.6);
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--green); box-shadow: 0 0 6px rgba(0,230,122,0.7);
   animation: dot-blink 2s ease-in-out infinite;
 }
-@keyframes dot-blink {
-  0%,100% { opacity: 1; }
-  50%     { opacity: 0.3; }
-}
+@keyframes dot-blink { 0%, 100% { opacity:1; } 50% { opacity:0.25; } }
 
-/* ── Version line ────────────────────────────────────── */
 .version-line {
-  position: fixed;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 9px;
-  letter-spacing: 0.2em;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  z-index: 20;
-  white-space: nowrap;
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  font-size: 9px; letter-spacing: 0.2em; color: var(--text-dim);
+  text-transform: uppercase; z-index: 20; white-space: nowrap;
+  font-family: var(--display);
 }
 </style>
 </head>
 <body>
 
-<div class="bg-grid"></div>
-<div class="bg-vignette"></div>
+<div class="bg-dots"></div>
+<div class="bg-fade"></div>
 <div class="bg-glow"></div>
-<div class="bg-sweep"></div>
 
 <div class="stage">
   <div class="card">
-    <div class="card-scan"></div>
+    <div class="card-bl"></div>
+    <div class="card-br"></div>
+    <div class="scan"></div>
 
-    <div class="header">
-      <div class="icon-ring">
-        <!-- engine/car icon -->
-        <svg viewBox="0 0 24 24">
-          <path d="M3 8h2l2-3h10l2 3h2a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-1v2a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1v-2H8v2a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-2H3a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z"/>
-          <circle cx="7" cy="12" r="1.5"/>
-          <circle cx="17" cy="12" r="1.5"/>
-          <line x1="9" y1="8" x2="15" y2="8"/>
-        </svg>
-      </div>
+    <div class="hd">
+      <div class="logo-mark"><span>CDC</span></div>
       <div>
         <div class="title">Car Data Collector</div>
-        <div class="subtitle">Dashboard Access</div>
+        <div class="subtitle">Pipeline Dashboard</div>
       </div>
     </div>
 
     <form method="POST" action="/login" autocomplete="off">
-
       {% if error %}
       <div class="error-msg">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -380,22 +238,12 @@ input[type="password"]:focus {
       <div class="field">
         <label class="field-label" for="token">Access Token</label>
         <div class="field-wrap">
-          <svg viewBox="0 0 24 24">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-          </svg>
-          <input
-            type="password"
-            id="token"
-            name="token"
-            placeholder="Enter your access token"
-            autofocus
-            autocomplete="current-password"
-          >
+          <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <input type="password" id="token" name="token" placeholder="••••••••••••" autofocus autocomplete="current-password">
         </div>
       </div>
 
-      <button type="submit" class="btn">Authenticate</button>
+      <button type="submit" class="btn-submit">Authenticate</button>
     </form>
 
     <div class="card-footer">
@@ -412,20 +260,13 @@ input[type="password"]:focus {
 <div class="version-line">Automotive Intelligence Pipeline &nbsp;·&nbsp; v2.0</div>
 
 <script>
-  // Shake card on error
   (() => {
     {% if error %}
     const card = document.querySelector('.card');
-    card.style.animation = 'card-in 0.7s cubic-bezier(0.16,1,0.3,1) both, shake 0.4s 0.7s ease both';
-    const style = document.createElement('style');
-    style.textContent = `@keyframes shake {
-      0%,100%{transform:translateX(0)}
-      20%{transform:translateX(-6px)}
-      40%{transform:translateX(6px)}
-      60%{transform:translateX(-4px)}
-      80%{transform:translateX(4px)}
-    }`;
-    document.head.appendChild(style);
+    const s = document.createElement('style');
+    s.textContent = `@keyframes shake{0%,100%{transform:none}20%{transform:translateX(-7px)}40%{transform:translateX(7px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}`;
+    document.head.appendChild(s);
+    card.style.animation = 'card-up 0.55s cubic-bezier(0.16,1,0.3,1) both, shake 0.4s 0.55s ease both';
     {% endif %}
   })();
 </script>

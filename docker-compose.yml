@@ -27,6 +27,10 @@ services:
       # Leave empty to use unauthenticated JSON API (may get 403 from some IPs)
       - REDDIT_CLIENT_ID=
       - REDDIT_CLIENT_SECRET=
+    # The image's HEALTHCHECK probes :5050/health, but the collector runs no web
+    # server (that's the dashboard's job) — disable it so it isn't always unhealthy.
+    healthcheck:
+      disable: true
     depends_on:
       postgres:
         condition: service_healthy
@@ -56,6 +60,7 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ./logs:/app/logs
+      - ./src:/app/src:ro
     environment:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1

@@ -40,7 +40,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright browsers
+# Install Playwright browsers — set the path BEFORE install so chromium lands
+# where the runtime expects it (otherwise it goes to ~/.cache and is never found)
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN playwright install chromium
 RUN playwright install-deps chromium
 
@@ -58,7 +60,6 @@ RUN mkdir -p /app/data/raw/html \
 # Environment variables
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # Health check
 HEALTHCHECK --interval=5m --timeout=30s --start-period=60s --retries=3 \

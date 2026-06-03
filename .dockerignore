@@ -1,0 +1,36 @@
+# Python virtualenv — deps are installed via pip in the image, never copy this
+venv/
+.venv/
+env/
+
+# Runtime data — mounted as volumes, must not be baked into the image
+data/
+logs/
+
+# Version control
+.git/
+.gitignore
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editor / OS junk
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Secrets & local env
+.env
+.env.*
+
+# Docs / misc not needed at runtime
+*.md
+.claude/
+training_data.jsonl
+*.log

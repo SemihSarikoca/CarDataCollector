@@ -20,6 +20,15 @@ from src.utils.logger import get_logger
 
 logger = get_logger("qa_generator")
 
+# --- Forum / Reddit noise that leaks usernames and UI cruft into Q/A pairs ---
+# Reddit comments are stored as "[author | score N]\n<body>" (see reddit_api.py),
+# so usernames bleed straight into the LLM context. Strip these before generating.
+_COMMENT_HEADER_RE = re.compile(r'\[[^\]\n]{0,60}\|\s*score[^\]\n]*\]', re.I)  # [author | score N]
+_HANDLE_RE = re.compile(r'(?<![A-Za-z0-9])/?[ur]/[A-Za-z0-9_-]+', re.I)        # u/x, r/x, /u/x, /r/x
+_DELETED_RE = re.compile(r'\[(?:deleted|removed)\]', re.I)
+_MULTISPACE_RE = re.compile(r'[ \t]{2,}')
+_MULTINEWLINE_RE = re.compile(r'\n{3,}')
+
 
 class QAGenerator:
     """
@@ -65,7 +74,18 @@ Rules:
 3. Each Q/A pair must be independently understandable
 4. Include make, model, year if mentioned
 5. Focus on specific technical details, not general information
-6. Return as JSON array: [{"question": "...", "answer": "..."}]"""
+6. NEVER mention usernames, forum handles, post authors, or "the post/comment".
+   Write generic automotive knowledge — never address a specific user by name.
+7. Return ONLY a valid JSON array, nothing else: [{"question": "...", "answer": "..."}]"""
+
+    def _clean_text(self, text: str) -> str:
+        """Strip forum usernames and UI noise so they don't leak into Q/A pairs."""
+        text = _COMMENT_HEADER_RE.sub(" ", text)   # [author | score N] headers
+        text = _HANDLE_RE.sub(" ", text)           # u/name, r/sub handles
+        text = _DELETED_RE.sub(" ", text)          # [deleted] / [removed]
+        text = _MULTISPACE_RE.sub(" ", text)
+        text = _MULTINEWLINE_RE.sub("\n\n", text)
+        return text.strip()
 
     def _truncate_to_context(self, text: str) -> str:
         if len(text) <= self.max_context_chars:
@@ -113,6 +133,7 @@ Rules:
         if not text or len(text) < 100:
             return []
 
+        text = self._clean_text(text)
         text = self._truncate_to_context(text)
 
         # Extract car info
@@ -136,10 +157,11 @@ Title: {title}
 
 Generate between {self.min_qa_per_doc} and {self.max_qa_per_doc} high-quality
 Q/A pairs. Each pair must be independently understandable. Answers must be
-detailed and technical. Return strictly as a JSON array:
-[{{"question": "...", "answer": "..."}}]
+detailed and technical. Do NOT reference usernames, forum handles, or "the
+post/comment" — write questions as general automotive knowledge.
 
-Return JSON only, no other text."""
+Return ONLY a valid JSON array, no markdown, no commentary:
+[{{"question": "...", "answer": "..."}}]"""
 
         try:
             response = await self._client.post(
@@ -149,6 +171,10 @@ Return JSON only, no other text."""
                     "prompt": user_prompt,
                     "system": self.system_prompt,
                     "stream": False,
+                    # NOTE: deliberately NOT using Ollama's format="json" — with
+                    # qwen2.5:3b it biases the model toward a single object instead
+                    # of an array of pairs, tanking yield. The tolerant parser below
+                    # (fences, object-wrap, salvage) handles syntax errors instead.
                     "options": {
                         "temperature": self.temperature,
                         "num_predict": self.max_tokens,
@@ -175,32 +201,74 @@ Return JSON only, no other text."""
             return []
 
     def _parse_qa_response(self, text: str) -> list[dict]:
-        """LLM çıktısından JSON Q/A çiftlerini parse et"""
-        # JSON array'i bul
-        json_match = re.search(r'\[[\s\S]*\]', text)
-        if not json_match:
+        """LLM çıktısından JSON Q/A çiftlerini parse et (toleranslı)."""
+        if not text:
+            return []
+
+        # Strip markdown code fences if the model wrapped its output
+        cleaned = re.sub(r'```(?:json)?', '', text).strip()
+        qa_list = None
+
+        # 1) Direct JSON array
+        m = re.search(r'\[[\s\S]*\]', cleaned)
+        if m:
+            try:
+                parsed = json.loads(m.group())
+                if isinstance(parsed, list):
+                    qa_list = parsed
+            except json.JSONDecodeError:
+                pass
+
+        # 2) Object wrapping the array, e.g. {"qa_pairs": [...]}, or a single
+        #    bare pair {"question": "...", "answer": "..."}
+        if qa_list is None:
+            try:
+                obj = json.loads(cleaned)
+                if isinstance(obj, list):
+                    qa_list = obj
+                elif isinstance(obj, dict):
+                    if "question" in obj and "answer" in obj:
+                        qa_list = [obj]
+                    else:
+                        qa_list = next((v for v in obj.values() if isinstance(v, list)), None)
+            except json.JSONDecodeError:
+                pass
+
+        # 3) Salvage individual pairs from malformed / truncated JSON
+        if qa_list is None:
+            qa_list = self._salvage_pairs(cleaned)
+
+        if not isinstance(qa_list, list) or not qa_list:
             logger.warning("no_json_found_in_response", text_preview=text[:200])
             return []
 
-        try:
-            qa_list = json.loads(json_match.group())
-            if not isinstance(qa_list, list):
-                return []
+        valid_pairs = []
+        for item in qa_list:
+            if isinstance(item, dict) and "question" in item and "answer" in item:
+                q = str(item["question"]).strip()
+                a = str(item["answer"]).strip()
+                # Minimum kalite kontrolü
+                if len(q) > 10 and len(a) > 20:
+                    valid_pairs.append({"question": q, "answer": a})
 
-            valid_pairs = []
-            for item in qa_list:
-                if isinstance(item, dict) and "question" in item and "answer" in item:
-                    q = item["question"].strip()
-                    a = item["answer"].strip()
-                    # Minimum kalite kontrolü
-                    if len(q) > 10 and len(a) > 20:
-                        valid_pairs.append({"question": q, "answer": a})
+        return valid_pairs
 
-            return valid_pairs
-
-        except json.JSONDecodeError as e:
-            logger.warning("json_parse_error", error=str(e), text_preview=text[:200])
-            return []
+    def _salvage_pairs(self, text: str) -> list[dict]:
+        """Bozuk/yarıda kesilmiş JSON'dan tam {question, answer} objelerini kurtar."""
+        obj_re = re.compile(
+            r'\{\s*"question"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*'
+            r'"answer"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}',
+            re.S,
+        )
+        pairs = []
+        for match in obj_re.finditer(text):
+            try:
+                q = json.loads(f'"{match.group(1)}"')
+                a = json.loads(f'"{match.group(2)}"')
+                pairs.append({"question": q, "answer": a})
+            except json.JSONDecodeError:
+                continue
+        return pairs
 
     async def _process_single_doc(self, doc: dict, semaphore: asyncio.Semaphore) -> dict:
         """Process one document: fetch text, run Ollama, insert Q/A pairs."""

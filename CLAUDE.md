@@ -54,6 +54,7 @@ Environment variables override `config/settings.yaml` credentials:
 - `DATABASE_URL` — PostgreSQL DSN (e.g. `postgresql://collector:collector_pass@localhost:5432/car_collector`)
 - `REDIS_URL` — Redis DSN (e.g. `redis://localhost:6379/0`)
 - `OLLAMA_URL` — Ollama API URL (e.g. `http://localhost:11434`)
+- `FLARESOLVERR_URL` — FlareSolverr API URL for cloudflare_protected sources (e.g. `http://localhost:8191`)
 
 ## Architecture
 
@@ -65,7 +66,8 @@ Environment variables override `config/settings.yaml` credentials:
 
 ### Scraper hierarchy (`src/scrapers/`)
 - `BaseScraper` — abstract base. Implements `fetch_page()` (aiohttp or Playwright), rate limiting via `AsyncLimiter`, retry via `tenacity`. Subclasses must implement `scrape_listing(url)` and `scrape_item(url)`. The `run()` async generator ties them together.
-- `CloudflareBypass` (`bypass/cloudflare.py`) — wraps Playwright-stealth; persists per-source browser state to `data/cookies/<source_name>.json`.
+- `CloudflareBypass` (`bypass/cloudflare.py`) — wraps Playwright-stealth; persists per-source browser state to `data/cookies/<source_name>.json`. Used for `use_playwright` (non-Cloudflare) sources.
+- `FlareSolverrClient` (`bypass/flaresolverr.py`) — sources with `cloudflare_protected: true` are fetched **exclusively** via a FlareSolverr service (no Playwright); one session is opened per source per round. If FlareSolverr is unreachable (`FLARESOLVERR_URL`), the source is skipped for that round with a warning.
 - **Special scrapers** registered in `CUSTOM_SCRAPERS` dict in `pipeline/__init__.py`: `RedditAPIScraper` (uses Reddit JSON API) and `NHTSAAPIScraper` (uses NHTSA REST API).
 - Anything not in `CUSTOM_SCRAPERS` falls back to `GenericForumScraper` or `GenericContentScraper`.
 

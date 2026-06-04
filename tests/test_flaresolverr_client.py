@@ -4,7 +4,7 @@ import pytest
 from src.scrapers.bypass.flaresolverr import FlareSolverrClient
 
 
-def _client(monkeypatch_env=None):
+def _client():
     cfg = {"flaresolverr": {"url": "http://fs:8191", "max_timeout_ms": 55000}}
     return FlareSolverrClient(cfg)
 
@@ -105,3 +105,15 @@ async def test_health_true_false(monkeypatch):
 
     monkeypatch.setattr(c, "_ping", ping_bad)
     assert await c.health() is False
+
+
+async def test_fetch_returns_none_when_command_raises(monkeypatch):
+    c = _client()
+
+    async def boom(payload):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(c, "_command", boom)
+    html, status = await c.fetch("https://site/x", "sess")
+    assert html is None
+    assert status == 0

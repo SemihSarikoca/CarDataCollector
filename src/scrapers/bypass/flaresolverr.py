@@ -9,6 +9,7 @@ Endpoint resolution order: FLARESOLVERR_URL env var > config.flaresolverr.url >
 http://localhost:8191.
 """
 
+import asyncio
 import os
 from typing import Optional, Tuple
 
@@ -32,10 +33,18 @@ class FlareSolverrClient:
         self.max_timeout_ms = int(fs_cfg.get("max_timeout_ms", 60000))
         self._external_session = session
         self._session: Optional[aiohttp.ClientSession] = session
+        self._session_lock: asyncio.Lock = asyncio.Lock()
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+        # Fast path: external session is always valid; own healthy session is reused.
+        if self._external_session is not None:
+            return self._external_session
+        if self._session is not None and not self._session.closed:
+            return self._session
+        async with self._session_lock:
+            # Re-check inside the lock; another coroutine may have created it already.
+            if self._session is None or self._session.closed:
+                self._session = aiohttp.ClientSession()
         return self._session
 
     async def _command(self, payload: dict) -> dict:
@@ -44,6 +53,9 @@ class FlareSolverrClient:
         # +10s slack so our HTTP read outlives FlareSolverr's own maxTimeout.
         timeout = aiohttp.ClientTimeout(total=self.max_timeout_ms / 1000 + 10)
         async with session.post(f"{self.url}/v1", json=payload, timeout=timeout) as resp:
+            if resp.status >= 400:
+                logger.warning("flaresolverr_http_status", status=resp.status,
+                               url=str(resp.url))
             return await resp.json()
 
     async def _ping(self) -> bool:

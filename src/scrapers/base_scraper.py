@@ -20,6 +20,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.models import ContentCategory, ScrapedItem, SourceConfig
 from src.scrapers.bypass.cloudflare import CloudflareBypass
+from src.scrapers.bypass.flaresolverr import FlareSolverrClient
 from src.utils.helpers import clean_html_text, clean_text, normalize_url
 from src.utils.logger import get_logger
 
@@ -50,6 +51,11 @@ class BaseScraper(ABC):
         
         # Cloudflare bypass handler
         self._cloudflare_bypass: Optional[CloudflareBypass] = None
+
+        # FlareSolverr (used only for cloudflare_protected sources)
+        self._flaresolverr: Optional[FlareSolverrClient] = None
+        self._fs_session: Optional[str] = None
+        self._cf_skip: bool = False
         
         # HTTP session (for non-Playwright requests)
         self._session: Optional[aiohttp.ClientSession] = None
@@ -71,11 +77,23 @@ class BaseScraper(ABC):
 
     async def start(self):
         """Initialize session and bypass handlers"""
-        # Initialize Cloudflare bypass if needed
-        if self.use_playwright or self.cloudflare_protected:
-            # Per-source cookie jar so different domains don't cross-contaminate
-            # and so we can keep one site's solved Cloudflare state warm even
-            # if another's expires.
+        # Cloudflare-protected sources go exclusively through FlareSolverr;
+        # we do NOT start Playwright for them (avoids two browsers at once).
+        if self.cloudflare_protected:
+            self._flaresolverr = FlareSolverrClient(self.global_config)
+            if await self._flaresolverr.health():
+                self._fs_session = await self._flaresolverr.create_session(self.name)
+                if not self._fs_session:
+                    self._cf_skip = True
+                    logger.warning("flaresolverr_session_failed", source=self.name)
+                else:
+                    logger.info("flaresolverr_ready", source=self.name)
+            else:
+                self._cf_skip = True
+                logger.warning("flaresolverr_unavailable", source=self.name,
+                               url=getattr(self._flaresolverr, "url", "unknown"))
+        elif self.use_playwright:
+            # Per-source cookie jar so different domains don't cross-contaminate.
             storage_cfg = self.global_config.get("storage", {})
             base_path = Path(storage_cfg.get("base_path", "./data"))
             state_path = base_path / "cookies" / f"{self.name}.json"
@@ -109,7 +127,12 @@ class BaseScraper(ABC):
         
         if self._cloudflare_bypass:
             await self._cloudflare_bypass.close()
-        
+
+        if self._flaresolverr:
+            if self._fs_session:
+                await self._flaresolverr.destroy_session(self._fs_session)
+            await self._flaresolverr.close()
+
         if self._session and not self._session.closed:
             await self._session.close()
         
@@ -133,8 +156,18 @@ class BaseScraper(ABC):
                 jitter = random.uniform(1.0, 3.0)
                 await asyncio.sleep(jitter)
 
-                # Use Playwright for JS-rendered or Cloudflare-protected sites
-                if self.use_playwright or self.cloudflare_protected:
+                # Cloudflare-protected sources: FlareSolverr only.
+                if self.cloudflare_protected:
+                    if self._cf_skip or not self._flaresolverr:
+                        return None  # service down → skip, no retries
+                    content, status = await self._flaresolverr.fetch(url, self._fs_session)
+                    if content and status == 200:
+                        self._pages_scraped += 1
+                        return content
+                    return None
+
+                # JS-heavy (non-CF) sources still use Playwright/CloudflareBypass.
+                if self.use_playwright:
                     if self._cloudflare_bypass:
                         content, status = await self._cloudflare_bypass.fetch(
                             url,
@@ -146,7 +179,6 @@ class BaseScraper(ABC):
                             return content
                         elif status == 403:
                             logger.warning("blocked", source=self.name, url=url)
-                            # Rotate identity and retry
                             await self._cloudflare_bypass.rotate_identity()
                             return None
                         else:

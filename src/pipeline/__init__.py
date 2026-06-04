@@ -75,6 +75,10 @@ class PipelineOrchestrator:
         general_config = config.get("general", {})
         self.round_delay = general_config.get("round_delay_seconds", 3600)
         self.max_workers = general_config.get("max_workers", 4)
+        # Sources that scrape nothing (fetch failure / 0 new items) are retried
+        # after this short window instead of waiting their full scrape_interval_hours,
+        # so a temporarily-broken source can't go dark for days.
+        self.failed_retry_hours = general_config.get("failed_retry_hours", 1)
 
         # Q/A için minimum döküman eşiği
         qa_stages = [s for s in pipeline_config.get("stages", []) if s.get("name") == "generate_qa"]
@@ -148,21 +152,33 @@ class PipelineOrchestrator:
             return []
 
         names = [s.name for s in all_sources]
-        last_scrape_times = await self.db.get_last_scrape_times(names)
+        schedule = await self.db.get_scrape_schedule(names)
 
         now = datetime.now(timezone.utc)
+        retry_floor = timedelta(hours=self.failed_retry_hours)
         due, skipped = [], []
         for source in all_sources:
-            last = last_scrape_times.get(source.name)
-            if last is None:
+            last_attempt, last_success = schedule.get(source.name, (None, None))
+            interval = timedelta(hours=source.scrape_interval_hours)
+
+            if last_attempt is None:
+                due.append(source)            # never attempted → scrape now
+                continue
+
+            if last_success is not None and last_attempt <= last_success:
+                # most recent attempt reached the site (fetched items, even if all
+                # duplicates) → respect the full interval
+                next_due = last_success + interval
+            else:
+                # most recent attempt fetched nothing (fetch failure / block)
+                # → retry soon instead of locking the source out for its full interval
+                next_due = last_attempt + retry_floor
+
+            if now >= next_due:
                 due.append(source)
             else:
-                next_due = last + timedelta(hours=source.scrape_interval_hours)
-                if now >= next_due:
-                    due.append(source)
-                else:
-                    wait_mins = int((next_due - now).total_seconds() / 60)
-                    skipped.append((source.name, wait_mins))
+                wait_mins = int((next_due - now).total_seconds() / 60)
+                skipped.append((source.name, wait_mins))
 
         if skipped:
             logger.info("sources_skipped_not_due",

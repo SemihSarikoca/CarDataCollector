@@ -17,6 +17,8 @@ def _cf_source():
 
 
 class _FakeFS:
+    url = "http://fake-flaresolverr:8191"
+
     def __init__(self, healthy=True, html="<html>real</html>", status=200):
         self._healthy = healthy
         self._html = html
@@ -72,3 +74,28 @@ async def test_fetch_through_flaresolverr_when_healthy(monkeypatch):
     assert fake.fetched == [("https://bobistheoilguy.com/forums/", "bobistheoilguy")]
     await scraper.stop()
     assert fake.destroyed == "bobistheoilguy"
+
+
+async def test_skip_when_session_creation_fails(monkeypatch):
+    scraper = GenericForumScraper(_cf_source(), {"general": {}, "storage": {}})
+
+    class _NoSessionFS(_FakeFS):
+        async def health(self):
+            return True
+
+        async def create_session(self, name):
+            self.created = name
+            return None  # healthy but session creation fails
+
+    fake = _NoSessionFS()
+    monkeypatch.setattr(
+        "src.scrapers.base_scraper.FlareSolverrClient", lambda *a, **k: fake
+    )
+    await scraper.start()
+    assert scraper._cf_skip is True
+    assert scraper._cloudflare_bypass is None
+    html = await scraper.fetch_page("https://bobistheoilguy.com/forums/")
+    assert html is None
+    assert fake.fetched == []
+    await scraper.stop()
+    assert fake.destroyed is None  # no session was created → nothing to destroy

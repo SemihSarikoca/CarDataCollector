@@ -77,6 +77,9 @@ class BaseScraper(ABC):
 
     async def start(self):
         """Initialize session and bypass handlers"""
+        self._cf_skip = False
+        self._flaresolverr = None
+        self._fs_session = None
         # Cloudflare-protected sources go exclusively through FlareSolverr;
         # we do NOT start Playwright for them (avoids two browsers at once).
         if self.cloudflare_protected:
@@ -91,7 +94,7 @@ class BaseScraper(ABC):
             else:
                 self._cf_skip = True
                 logger.warning("flaresolverr_unavailable", source=self.name,
-                               url=getattr(self._flaresolverr, "url", "unknown"))
+                               url=self._flaresolverr.url)
         elif self.use_playwright:
             # Per-source cookie jar so different domains don't cross-contaminate.
             storage_cfg = self.global_config.get("storage", {})
@@ -148,7 +151,8 @@ class BaseScraper(ABC):
     async def fetch_page(self, url: str, wait_for_selector: str = None) -> Optional[str]:
         """
         Fetch page HTML with rate limiting and retry.
-        Uses Playwright for JS-heavy sites, aiohttp for simple sites.
+        Uses FlareSolverr for cloudflare_protected sources, Playwright for JS-heavy sites,
+        and aiohttp for simple sites.
         """
         async with self.rate_limiter:
             try:
@@ -164,6 +168,9 @@ class BaseScraper(ABC):
                     if content and status == 200:
                         self._pages_scraped += 1
                         return content
+                    self._errors += 1
+                    logger.warning("flaresolverr_fetch_unsuccessful", source=self.name,
+                                   url=url, status=status)
                     return None
 
                 # JS-heavy (non-CF) sources still use Playwright/CloudflareBypass.

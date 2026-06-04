@@ -1,7 +1,11 @@
 """Unit tests for the four CloudflareBypass fixes."""
 import pytest
 
-from src.scrapers.bypass.cloudflare import CloudflareBypass, evaluate_challenge_status
+from src.scrapers.bypass.cloudflare import (
+    CloudflareBypass,
+    evaluate_challenge_status,
+    filter_user_agents_for_platform,
+)
 
 
 def test_evaluate_promotes_solved_page():
@@ -75,3 +79,27 @@ async def test_rotate_called_before_retry(monkeypatch):
     assert content is None
     # max_retries=2 → one rotation between the two attempts.
     assert len(rotations) == 1
+
+
+UA_POOL = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/122.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) Chrome/122.0 Safari/537.36",
+]
+
+
+def test_filter_picks_macos_on_darwin():
+    out = filter_user_agents_for_platform(UA_POOL, "darwin")
+    assert out
+    assert all("Macintosh" in ua for ua in out)
+
+
+def test_filter_picks_windows_on_win32():
+    out = filter_user_agents_for_platform(UA_POOL, "win32")
+    assert all("Windows" in ua for ua in out)
+
+
+def test_filter_falls_back_to_full_pool_when_no_match():
+    pool = ["Mozilla/5.0 (X11; Linux x86_64) Chrome/122.0"]
+    out = filter_user_agents_for_platform(pool, "darwin")
+    assert out == pool  # no macOS UA → don't return empty

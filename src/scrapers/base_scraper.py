@@ -7,6 +7,7 @@ Supports both aiohttp (fast, for simple sites) and Playwright (for JS-heavy/prot
 import asyncio
 import hashlib
 import random
+import sys
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
@@ -19,7 +20,7 @@ from bs4 import BeautifulSoup
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.models import ContentCategory, ScrapedItem, SourceConfig
-from src.scrapers.bypass.cloudflare import CloudflareBypass
+from src.scrapers.bypass.cloudflare import CloudflareBypass, filter_user_agents_for_platform
 from src.scrapers.bypass.flaresolverr import FlareSolverrClient
 from src.utils.helpers import clean_html_text, clean_text, normalize_url
 from src.utils.logger import get_logger
@@ -70,10 +71,11 @@ class BaseScraper(ABC):
         self._is_running = False
 
     def _get_random_user_agent(self) -> str:
-        """Get random user agent"""
-        if self._user_agents:
-            return random.choice(self._user_agents)
-        return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        """Get random user agent matching the host OS (cleaner fingerprint)."""
+        pool = filter_user_agents_for_platform(self._user_agents, sys.platform)
+        if pool:
+            return random.choice(pool)
+        return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
     async def start(self):
         """Initialize session and bypass handlers"""

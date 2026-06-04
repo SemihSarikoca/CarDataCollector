@@ -5,6 +5,7 @@ Handles Cloudflare protection, bot detection, and anti-scraping measures.
 
 import asyncio
 import random
+import sys
 from pathlib import Path
 from typing import Optional, Tuple
 from urllib.parse import urlparse
@@ -49,6 +50,27 @@ def evaluate_challenge_status(initial_status: int, html: str, title: str) -> int
     return 200
 
 
+_PLATFORM_UA_TOKEN = {
+    "darwin": "Macintosh",
+    "win32": "Windows",
+    "linux": "Linux",
+}
+
+
+def filter_user_agents_for_platform(agents: list[str], platform: str) -> list[str]:
+    """Return only UAs whose OS token matches the host platform.
+
+    A macOS Chrome advertising a Linux/Windows UA conflicts with Client-Hints
+    (Sec-CH-UA-Platform) and is trivially flagged. Falls back to the full pool
+    when no UA matches (never returns empty).
+    """
+    token = _PLATFORM_UA_TOKEN.get(platform)
+    if not token:
+        return agents
+    matching = [ua for ua in agents if token in ua]
+    return matching or agents
+
+
 class CloudflareBypass:
     """
     Multi-strategy Cloudflare bypass handler.
@@ -80,10 +102,11 @@ class CloudflareBypass:
         self._current_user_agent = None
 
     def _get_random_user_agent(self) -> str:
-        """Get a random user agent from the pool"""
-        if self.user_agents:
-            return random.choice(self.user_agents)
-        return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        """Get a random user agent matching the host OS (cleaner fingerprint)."""
+        pool = filter_user_agents_for_platform(self.user_agents, sys.platform)
+        if pool:
+            return random.choice(pool)
+        return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
     def _get_random_viewport(self) -> dict:
         """Get a random viewport size to appear more human"""

@@ -33,17 +33,24 @@ CHALLENGE_MARKERS = (
     "cf-browser-verification",
 )
 
+# Statuses Cloudflare returns for its interstitial challenge. Only these are
+# eligible for promotion to 200 once the challenge clears; a genuine origin
+# 4xx/5xx must be reported as-is.
+CHALLENGE_STATUSES = (403, 503)
+
 
 def evaluate_challenge_status(initial_status: int, html: str, title: str) -> int:
-    """Promote a stale 403 to 200 when the page is clearly the real content.
+    """Promote a stale Cloudflare challenge status (403/503) to 200 when the page
+    is clearly the real content.
 
-    The initial navigation to a Cloudflare site returns 403 with the interstitial.
+    The initial navigation to a Cloudflare site returns 403/503 with the interstitial.
     After the challenge clears, the same Page holds the real HTML but `response.status`
-    is still 403. If neither the title nor the body shows challenge markers, treat it
-    as a success.
+    is still the challenge status. If the status is a known challenge status and neither
+    the title nor the body shows challenge markers, treat it as success. Any other
+    status (200, 404, 500, ...) is returned unchanged.
     """
-    if initial_status == 200:
-        return 200
+    if initial_status not in CHALLENGE_STATUSES:
+        return initial_status
     haystack = f"{title}\n{html}".lower()
     if any(marker in haystack for marker in CHALLENGE_MARKERS):
         return initial_status

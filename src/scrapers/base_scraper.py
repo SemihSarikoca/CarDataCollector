@@ -79,6 +79,8 @@ class BaseScraper(ABC):
 
     async def start(self):
         """Initialize session and bypass handlers"""
+        if self._flaresolverr:
+            await self._flaresolverr.close()
         self._cf_skip = False
         self._flaresolverr = None
         self._fs_session = None

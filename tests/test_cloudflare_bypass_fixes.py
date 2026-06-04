@@ -27,6 +27,20 @@ def test_evaluate_passes_through_200():
     assert evaluate_challenge_status(200, "<html>ok</html>", "Forum") == 200
 
 
+def test_evaluate_does_not_promote_genuine_500():
+    # A non-Cloudflare 500 error page must NOT be promoted to 200.
+    assert evaluate_challenge_status(500, "<html>Internal Server Error</html>", "Error") == 500
+
+
+def test_evaluate_does_not_promote_404():
+    assert evaluate_challenge_status(404, "<html>Not Found</html>", "404") == 404
+
+
+def test_evaluate_promotes_503_challenge_when_cleared():
+    # Classic Cloudflare 'checking your browser' used 503; once cleared it's real content.
+    assert evaluate_challenge_status(503, "<html>Welcome to the forum</html>", "Forum") == 200
+
+
 def _bypass():
     cfg = {"cloudflare": {"enabled": True, "use_playwright": True,
                           "use_cloudscraper": True, "min_delay": 0, "max_delay": 0,

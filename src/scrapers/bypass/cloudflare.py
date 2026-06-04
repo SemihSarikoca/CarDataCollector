@@ -24,6 +24,30 @@ from src.utils.logger import get_logger
 
 logger = get_logger("cloudflare_bypass")
 
+CHALLENGE_MARKERS = (
+    "just a moment",
+    "cf-challenge",
+    "enable javascript and cookies",
+    "attention required",
+    "cf-browser-verification",
+)
+
+
+def evaluate_challenge_status(initial_status: int, html: str, title: str) -> int:
+    """Promote a stale 403 to 200 when the page is clearly the real content.
+
+    The initial navigation to a Cloudflare site returns 403 with the interstitial.
+    After the challenge clears, the same Page holds the real HTML but `response.status`
+    is still 403. If neither the title nor the body shows challenge markers, treat it
+    as a success.
+    """
+    if initial_status == 200:
+        return 200
+    haystack = f"{title}\n{html}".lower()
+    if any(marker in haystack for marker in CHALLENGE_MARKERS):
+        return initial_status
+    return 200
+
 
 class CloudflareBypass:
     """
@@ -222,6 +246,8 @@ class CloudflareBypass:
             await self._simulate_human_behavior(page)
 
             content = await page.content()
+            title = await page.title()
+            status = evaluate_challenge_status(status, content, title)
 
             # If we just cleared a challenge, persist cookies immediately so
             # the bypass survives a crash before close() runs.

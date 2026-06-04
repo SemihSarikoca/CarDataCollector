@@ -335,29 +335,25 @@ class CloudflareBypass:
         await self._random_delay()
         
         for attempt in range(self.max_retries):
-            # Try Playwright first
+            # 1) Try Playwright.
             if should_use_playwright and self._browser:
                 content, status = await self._fetch_with_playwright(url, wait_for_selector)
-                
                 if content and status == 200:
                     logger.debug("fetch_success", url=url, method="playwright", status=status)
                     return content, status
-                
-                if status == 403 or status == 503:
-                    logger.warning("cloudflare_blocked", url=url, attempt=attempt + 1)
-                    await asyncio.sleep(self.retry_delay)
-                    continue
-            
-            # Fallback to cloudscraper
+
+            # 2) Fall back to cloudscraper (now actually reached on a 403).
             if self.use_cloudscraper and self._cloudscraper:
                 content, status = self._fetch_with_cloudscraper(url)
-                
                 if content and status == 200:
                     logger.debug("fetch_success", url=url, method="cloudscraper", status=status)
                     return content, status
-            
-            # Wait before retry
+
+            # 3) Both strategies failed — rotate identity before the next attempt
+            #    so the retry differs from the one that was just blocked.
             if attempt < self.max_retries - 1:
+                logger.warning("cloudflare_blocked", url=url, attempt=attempt + 1)
+                await self.rotate_identity()
                 await asyncio.sleep(self.retry_delay / (attempt + 1))
         
         logger.error("fetch_failed_all_attempts", url=url)

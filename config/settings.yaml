@@ -90,6 +90,16 @@ cloudflare:
   retry_delay: 60
 
 # -----------------------------------------------------------------------------
+# FlareSolverr (primary fetch path for cloudflare_protected sources)
+# -----------------------------------------------------------------------------
+flaresolverr:
+  enabled: true
+  # Overridden by FLARESOLVERR_URL env var when set.
+  url: "http://localhost:8191"
+  # Max time FlareSolverr spends solving a single request, in milliseconds.
+  max_timeout_ms: 60000
+
+# -----------------------------------------------------------------------------
 # Playwright Settings
 # -----------------------------------------------------------------------------
 playwright:

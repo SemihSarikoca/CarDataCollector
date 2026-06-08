@@ -273,7 +273,10 @@ sources:
 
   - name: "cargurus_forum"
     type: "forum"
-    enabled: true
+    # Disabled: even via FlareSolverr (which clears Cloudflare), cargurus' own
+    # anti-bot layer returns an HTTP 418 block page with no discussion content,
+    # so no selector can extract anything. Re-enable only with a stronger fetch path.
+    enabled: false
     base_url: "https://www.cargurus.com"
     start_urls:
       - "https://www.cargurus.com/Cars/Discussion-General"

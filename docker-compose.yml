@@ -23,6 +23,8 @@ services:
       - REDIS_URL=redis://redis:6379/0
       # Ollama (running natively on host for Metal GPU access)
       - OLLAMA_URL=http://host.docker.internal:11434
+      # Cloudflare solver
+      - FLARESOLVERR_URL=http://flaresolverr:8191
       # Reddit OAuth - create app at https://www.reddit.com/prefs/apps (type: script)
       # Leave empty to use unauthenticated JSON API (may get 403 from some IPs)
       - REDDIT_CLIENT_ID=
@@ -134,6 +136,26 @@ services:
         limits:
           memory: 512M
           cpus: "0.5"
+
+  # ===========================================
+  # FlareSolverr (Cloudflare challenge solver)
+  # ===========================================
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: car-collector-flaresolverr
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=info
+      - TZ=America/New_York
+    ports:
+      - "8191:8191"
+    networks:
+      - collector-net
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
 
   # Ollama runs natively on the host (Metal GPU on Apple Silicon).
   # Start it with: ollama serve

@@ -5,6 +5,7 @@ Handles Cloudflare protection, bot detection, and anti-scraping measures.
 
 import asyncio
 import random
+import sys
 from pathlib import Path
 from typing import Optional, Tuple
 from urllib.parse import urlparse
@@ -23,6 +24,58 @@ except ModuleNotFoundError:  # pragma: no cover
 from src.utils.logger import get_logger
 
 logger = get_logger("cloudflare_bypass")
+
+CHALLENGE_MARKERS = (
+    "just a moment",
+    "cf-challenge",
+    "enable javascript and cookies",
+    "attention required",
+    "cf-browser-verification",
+)
+
+# Statuses Cloudflare returns for its interstitial challenge. Only these are
+# eligible for promotion to 200 once the challenge clears; a genuine origin
+# 4xx/5xx must be reported as-is.
+CHALLENGE_STATUSES = (403, 503)
+
+
+def evaluate_challenge_status(initial_status: int, html: str, title: str) -> int:
+    """Promote a stale Cloudflare challenge status (403/503) to 200 when the page
+    is clearly the real content.
+
+    The initial navigation to a Cloudflare site returns 403/503 with the interstitial.
+    After the challenge clears, the same Page holds the real HTML but `response.status`
+    is still the challenge status. If the status is a known challenge status and neither
+    the title nor the body shows challenge markers, treat it as success. Any other
+    status (200, 404, 500, ...) is returned unchanged.
+    """
+    if initial_status not in CHALLENGE_STATUSES:
+        return initial_status
+    haystack = f"{title}\n{html}".lower()
+    if any(marker in haystack for marker in CHALLENGE_MARKERS):
+        return initial_status
+    return 200
+
+
+_PLATFORM_UA_TOKEN = {
+    "darwin": "Macintosh",
+    "win32": "Windows",
+    "linux": "Linux",
+}
+
+
+def filter_user_agents_for_platform(agents: list[str], platform: str) -> list[str]:
+    """Return only UAs whose OS token matches the host platform.
+
+    A macOS Chrome advertising a Linux/Windows UA conflicts with Client-Hints
+    (Sec-CH-UA-Platform) and is trivially flagged. Falls back to the full pool
+    when no UA matches (never returns empty).
+    """
+    token = _PLATFORM_UA_TOKEN.get(platform)
+    if not token:
+        return agents
+    matching = [ua for ua in agents if token in ua]
+    return matching or agents
 
 
 class CloudflareBypass:
@@ -56,10 +109,11 @@ class CloudflareBypass:
         self._current_user_agent = None
 
     def _get_random_user_agent(self) -> str:
-        """Get a random user agent from the pool"""
-        if self.user_agents:
-            return random.choice(self.user_agents)
-        return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        """Get a random user agent matching the host OS (cleaner fingerprint)."""
+        pool = filter_user_agents_for_platform(self.user_agents, sys.platform)
+        if pool:
+            return random.choice(pool)
+        return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
     def _get_random_viewport(self) -> dict:
         """Get a random viewport size to appear more human"""
@@ -222,6 +276,8 @@ class CloudflareBypass:
             await self._simulate_human_behavior(page)
 
             content = await page.content()
+            title = await page.title()
+            status = evaluate_challenge_status(status, content, title)
 
             # If we just cleared a challenge, persist cookies immediately so
             # the bypass survives a crash before close() runs.
@@ -309,29 +365,25 @@ class CloudflareBypass:
         await self._random_delay()
         
         for attempt in range(self.max_retries):
-            # Try Playwright first
+            # 1) Try Playwright.
             if should_use_playwright and self._browser:
                 content, status = await self._fetch_with_playwright(url, wait_for_selector)
-                
                 if content and status == 200:
                     logger.debug("fetch_success", url=url, method="playwright", status=status)
                     return content, status
-                
-                if status == 403 or status == 503:
-                    logger.warning("cloudflare_blocked", url=url, attempt=attempt + 1)
-                    await asyncio.sleep(self.retry_delay)
-                    continue
-            
-            # Fallback to cloudscraper
+
+            # 2) Fall back to cloudscraper (now actually reached on a 403).
             if self.use_cloudscraper and self._cloudscraper:
                 content, status = self._fetch_with_cloudscraper(url)
-                
                 if content and status == 200:
                     logger.debug("fetch_success", url=url, method="cloudscraper", status=status)
                     return content, status
-            
-            # Wait before retry
+
+            # 3) Both strategies failed — rotate identity before the next attempt
+            #    so the retry differs from the one that was just blocked.
             if attempt < self.max_retries - 1:
+                logger.warning("cloudflare_blocked", url=url, attempt=attempt + 1)
+                await self.rotate_identity()
                 await asyncio.sleep(self.retry_delay / (attempt + 1))
         
         logger.error("fetch_failed_all_attempts", url=url)

@@ -488,18 +488,33 @@ class DatabaseManager:
     # Scrape logs
     # ------------------------------------------------------------------
 
-    async def get_last_scrape_times(self, source_names: list) -> dict:
-        """Return {source_name: last_started_at} for the given sources."""
+    async def get_scrape_schedule(self, source_names: list) -> dict:
+        """Return {source_name: (last_attempt, last_success)} for the given sources.
+
+        last_attempt — MAX(started_at) over all attempts.
+        last_success — MAX(started_at) over attempts that actually fetched items
+                       (items_scraped > 0), i.e. the site was reached successfully.
+
+        The pipeline throttles a source by its full interval only after it was
+        reached successfully (even if everything turned out to be a duplicate);
+        attempts that fetched nothing (fetch failure / block) get a much shorter
+        retry window so a broken source cannot stay dark for days.
+        """
         if not source_names:
             return {}
         async with self._pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT source_name, MAX(started_at) AS last_scraped_at
+                SELECT source_name,
+                       MAX(started_at) AS last_attempt,
+                       MAX(started_at) FILTER (WHERE items_scraped > 0) AS last_success
                 FROM scrape_logs
                 WHERE source_name = ANY($1)
                 GROUP BY source_name
             """, source_names)
-            return {row["source_name"]: row["last_scraped_at"] for row in rows}
+            return {
+                row["source_name"]: (row["last_attempt"], row["last_success"])
+                for row in rows
+            }
 
     async def log_scrape_start(self, source_name: str, round_number: int) -> str:
         """Insert a running scrape_logs row; returns the log UUID."""

@@ -7,6 +7,7 @@ Supports both aiohttp (fast, for simple sites) and Playwright (for JS-heavy/prot
 import asyncio
 import hashlib
 import random
+import sys
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
@@ -19,7 +20,8 @@ from bs4 import BeautifulSoup
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.models import ContentCategory, ScrapedItem, SourceConfig
-from src.scrapers.bypass.cloudflare import CloudflareBypass
+from src.scrapers.bypass.cloudflare import CloudflareBypass, filter_user_agents_for_platform
+from src.scrapers.bypass.flaresolverr import FlareSolverrClient
 from src.utils.helpers import clean_html_text, clean_text, normalize_url
 from src.utils.logger import get_logger
 
@@ -50,6 +52,11 @@ class BaseScraper(ABC):
         
         # Cloudflare bypass handler
         self._cloudflare_bypass: Optional[CloudflareBypass] = None
+
+        # FlareSolverr (used only for cloudflare_protected sources)
+        self._flaresolverr: Optional[FlareSolverrClient] = None
+        self._fs_session: Optional[str] = None
+        self._cf_skip: bool = False
         
         # HTTP session (for non-Playwright requests)
         self._session: Optional[aiohttp.ClientSession] = None
@@ -64,18 +71,36 @@ class BaseScraper(ABC):
         self._is_running = False
 
     def _get_random_user_agent(self) -> str:
-        """Get random user agent"""
-        if self._user_agents:
-            return random.choice(self._user_agents)
-        return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        """Get random user agent matching the host OS (cleaner fingerprint)."""
+        pool = filter_user_agents_for_platform(self._user_agents, sys.platform)
+        if pool:
+            return random.choice(pool)
+        return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
     async def start(self):
         """Initialize session and bypass handlers"""
-        # Initialize Cloudflare bypass if needed
-        if self.use_playwright or self.cloudflare_protected:
-            # Per-source cookie jar so different domains don't cross-contaminate
-            # and so we can keep one site's solved Cloudflare state warm even
-            # if another's expires.
+        if self._flaresolverr:
+            await self._flaresolverr.close()
+        self._cf_skip = False
+        self._flaresolverr = None
+        self._fs_session = None
+        # Cloudflare-protected sources go exclusively through FlareSolverr;
+        # we do NOT start Playwright for them (avoids two browsers at once).
+        if self.cloudflare_protected:
+            self._flaresolverr = FlareSolverrClient(self.global_config)
+            if await self._flaresolverr.health():
+                self._fs_session = await self._flaresolverr.create_session(self.name)
+                if not self._fs_session:
+                    self._cf_skip = True
+                    logger.warning("flaresolverr_session_failed", source=self.name)
+                else:
+                    logger.info("flaresolverr_ready", source=self.name)
+            else:
+                self._cf_skip = True
+                logger.warning("flaresolverr_unavailable", source=self.name,
+                               url=self._flaresolverr.url)
+        elif self.use_playwright:
+            # Per-source cookie jar so different domains don't cross-contaminate.
             storage_cfg = self.global_config.get("storage", {})
             base_path = Path(storage_cfg.get("base_path", "./data"))
             state_path = base_path / "cookies" / f"{self.name}.json"
@@ -109,7 +134,12 @@ class BaseScraper(ABC):
         
         if self._cloudflare_bypass:
             await self._cloudflare_bypass.close()
-        
+
+        if self._flaresolverr:
+            if self._fs_session:
+                await self._flaresolverr.destroy_session(self._fs_session)
+            await self._flaresolverr.close()
+
         if self._session and not self._session.closed:
             await self._session.close()
         
@@ -125,7 +155,8 @@ class BaseScraper(ABC):
     async def fetch_page(self, url: str, wait_for_selector: str = None) -> Optional[str]:
         """
         Fetch page HTML with rate limiting and retry.
-        Uses Playwright for JS-heavy sites, aiohttp for simple sites.
+        Uses FlareSolverr for cloudflare_protected sources, Playwright for JS-heavy sites,
+        and aiohttp for simple sites.
         """
         async with self.rate_limiter:
             try:
@@ -133,8 +164,21 @@ class BaseScraper(ABC):
                 jitter = random.uniform(1.0, 3.0)
                 await asyncio.sleep(jitter)
 
-                # Use Playwright for JS-rendered or Cloudflare-protected sites
-                if self.use_playwright or self.cloudflare_protected:
+                # Cloudflare-protected sources: FlareSolverr only.
+                if self.cloudflare_protected:
+                    if self._cf_skip or not self._flaresolverr:
+                        return None  # service down → skip, no retries
+                    content, status = await self._flaresolverr.fetch(url, self._fs_session)
+                    if content and status == 200:
+                        self._pages_scraped += 1
+                        return content
+                    self._errors += 1
+                    logger.warning("flaresolverr_fetch_unsuccessful", source=self.name,
+                                   url=url, status=status)
+                    return None
+
+                # JS-heavy (non-CF) sources still use Playwright/CloudflareBypass.
+                if self.use_playwright:
                     if self._cloudflare_bypass:
                         content, status = await self._cloudflare_bypass.fetch(
                             url,
@@ -146,7 +190,6 @@ class BaseScraper(ABC):
                             return content
                         elif status == 403:
                             logger.warning("blocked", source=self.name, url=url)
-                            # Rotate identity and retry
                             await self._cloudflare_bypass.rotate_identity()
                             return None
                         else:

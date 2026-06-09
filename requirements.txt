@@ -5,6 +5,7 @@
 # Core HTTP & Scraping
 # =============================================================================
 aiohttp>=3.9.0
+Brotli>=1.1.0  # lets aiohttp decode Brotli (Content-Encoding: br) responses; many sites serve br
 aiofiles>=23.2.1
 asyncio-throttle>=1.0.2
 beautifulsoup4>=4.12.2
@@ -96,3 +97,9 @@ tqdm>=4.66.1
 tenacity>=8.2.3
 psutil>=5.9.7
 fake-useragent>=1.4.0
+
+# =============================================================================
+# Testing (dev only)
+# =============================================================================
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

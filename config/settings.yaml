@@ -97,7 +97,10 @@ flaresolverr:
   # Overridden by FLARESOLVERR_URL env var when set.
   url: "http://localhost:8191"
   # Max time FlareSolverr spends solving a single request, in milliseconds.
-  max_timeout_ms: 60000
+  # Heavy ad-laden forum pages (toyotanation threads, ~1.2 MB) routinely need
+  # 60-100s to finish loading in FlareSolverr's browser; 60s caused systematic
+  # "Timeout after 60.0 seconds" 500s and zero items.
+  max_timeout_ms: 120000
 
 # -----------------------------------------------------------------------------
 # Playwright Settings
@@ -189,7 +192,12 @@ sources:
   # =========================================================================
   - name: "reddit_mechanicadvice"
     type: "forum"
-    enabled: true
+    # Disabled 2026-06: reddit.com returns 403 for ALL unauthenticated JSON
+    # endpoints (www/old/api hosts, any user-agent) from this network.
+    # The scraper already supports OAuth via PRAW: set REDDIT_CLIENT_ID and
+    # REDDIT_CLIENT_SECRET (script app, https://www.reddit.com/prefs/apps),
+    # then re-enable. docker-compose.yml already passes both env vars.
+    enabled: false
     base_url: "https://www.reddit.com"
     start_urls:
       - "https://www.reddit.com/r/MechanicAdvice/top/?t=all"
@@ -212,7 +220,12 @@ sources:
 
   - name: "reddit_cartalk"
     type: "forum"
-    enabled: true
+    # Disabled 2026-06: reddit.com returns 403 for ALL unauthenticated JSON
+    # endpoints (www/old/api hosts, any user-agent) from this network.
+    # The scraper already supports OAuth via PRAW: set REDDIT_CLIENT_ID and
+    # REDDIT_CLIENT_SECRET (script app, https://www.reddit.com/prefs/apps),
+    # then re-enable. docker-compose.yml already passes both env vars.
+    enabled: false
     base_url: "https://www.reddit.com"
     start_urls:
       - "https://www.reddit.com/r/Cartalk/top/?t=all"
@@ -234,23 +247,26 @@ sources:
     type: "forum"
     enabled: true
     base_url: "https://bobistheoilguy.com"
+    # XenForo 2 board. The /forums/ index only lists subforums (node links),
+    # so start directly inside the high-value technical subforums.
     start_urls:
-      - "https://bobistheoilguy.com/forums/"
+      - "https://bobistheoilguy.com/forums/forums/passenger-car-motor-oil-pcmo-gasoline-vehicles.1/"
+      - "https://bobistheoilguy.com/forums/forums/mechanical-maintenance-forum.23/"
+      - "https://bobistheoilguy.com/forums/forums/automotive-general-topics.39/"
     category: "forum"
     priority: 2
     rate_limit: 5.0
     scrape_interval_hours: 12
-    max_pages_per_round: 300
+    max_pages_per_round: 60  # serialized FlareSolverr budget (~1 page/min)
     use_playwright: true
     cloudflare_protected: true
     selectors:
-      forum_list: "a.forumtitle"
-      thread_list: "a.topictitle"
-      thread_title: "h2.topic-title"
-      post_content: "div.content"
+      thread_list: ".structItem-title a"
+      thread_title: "h1"
+      post_content: ".message-body .bbWrapper"
       post_author: "a.username"
       post_date: "time"
-      pagination_next: "a.arrow.next"
+      pagination_next: "a.pageNav-jump--next"
 
   - name: "automotiveforums"
     type: "forum"
@@ -284,7 +300,7 @@ sources:
     priority: 2
     rate_limit: 5.0
     scrape_interval_hours: 12
-    max_pages_per_round: 300
+    max_pages_per_round: 60  # serialized FlareSolverr budget (~1 page/min)
     use_playwright: true
     cloudflare_protected: true
     selectors:
@@ -308,18 +324,24 @@ sources:
     priority: 1
     rate_limit: 5.0
     scrape_interval_hours: 24
-    max_pages_per_round: 500
+    max_pages_per_round: 60  # serialized FlareSolverr budget (~1 page/min)
     use_playwright: true
     cloudflare_protected: true
     selectors:
-      article_list: "a.symptom-link, a.problem-link"
+      # Verified 2026-06: symptom/problem links are plain hrefs, article body
+      # lives in div#main-container (no .article-content/.symptom-content classes).
+      article_list: "a[href^='/symptoms/'], a[href*='repairpal.com/symptoms/'], a[href^='/problems/'], a[href*='repairpal.com/problems/']"
       article_title: "h1"
-      article_content: "div.article-content, div.symptom-content"
+      article_content: "div#main-container"
       pagination_next: "a.next"
 
   - name: "carcarekiosk"
     type: "technical"
-    enabled: true
+    # Disabled 2026-06: /video redirects to the homepage; the site is a
+    # Make → Model/Year → video-page hierarchy whose pages are just video link
+    # indexes with no instructional text. The one-level generic scraper can't
+    # extract Q/A-worthy text from it.
+    enabled: false
     base_url: "https://www.carcarekiosk.com"
     start_urls:
       - "https://www.carcarekiosk.com/video"
@@ -338,7 +360,10 @@ sources:
 
   - name: "autozone_guides"
     type: "technical"
-    enabled: true
+    # Disabled: autozone.com serves a JS-only SPA shell (country-selector page,
+    # zero anchors / zero article content) even through FlareSolverr with the
+    # challenge cleared. Needs a real browser-rendering fetch path to be usable.
+    enabled: false
     base_url: "https://www.autozone.com"
     start_urls:
       - "https://www.autozone.com/diy/repair-guides"
@@ -346,7 +371,7 @@ sources:
     priority: 2
     rate_limit: 5.0
     scrape_interval_hours: 24
-    max_pages_per_round: 400
+    max_pages_per_round: 60  # serialized FlareSolverr budget (~1 page/min)
     use_playwright: true
     cloudflare_protected: true
     selectors:
@@ -362,20 +387,24 @@ sources:
     type: "technical"
     enabled: true
     base_url: "https://www.carcomplaints.com"
+    # /problems/ does not exist; the ranking pages link to per-vehicle overview
+    # pages like /Toyota/Camry/2007/ from the bar-graph list (div#graph).
     start_urls:
       - "https://www.carcomplaints.com/top_vehicles/"
-      - "https://www.carcomplaints.com/problems/"
+      - "https://www.carcomplaints.com/worst_vehicles/"
     category: "complaints"
     priority: 1
     rate_limit: 3.0
     scrape_interval_hours: 48
-    max_pages_per_round: 500
+    max_pages_per_round: 60  # serialized FlareSolverr budget (~1 page/min)
     use_playwright: true
     cloudflare_protected: true
     selectors:
-      article_list: "a.complaint-link"
-      article_title: "h1"
-      article_content: "div.complaint-details"
+      article_list: "div#graph a, div#graphcontainer a"
+      # NOT plain "h1": the site-wide header h1 comes first in document order;
+      # the vehicle name ("2007 Toyota Camry") is the h1 inside div#primary.
+      article_title: "div#primary h1"
+      article_content: "div#primary"
       pagination_next: "a.next"
 
   - name: "nhtsa"
@@ -493,7 +522,7 @@ sources:
     priority: 3
     rate_limit: 5.0
     scrape_interval_hours: 48
-    max_pages_per_round: 200
+    max_pages_per_round: 60  # serialized FlareSolverr budget (~1 page/min)
     use_playwright: true
     cloudflare_protected: true
     selectors:
@@ -514,7 +543,7 @@ sources:
     priority: 3
     rate_limit: 5.0
     scrape_interval_hours: 48
-    max_pages_per_round: 200
+    max_pages_per_round: 60  # serialized FlareSolverr budget (~1 page/min)
     use_playwright: true
     cloudflare_protected: true
     selectors:
@@ -552,7 +581,12 @@ sources:
   # =========================================================================
   - name: "reddit_justrolledintotheshop"
     type: "forum"
-    enabled: true
+    # Disabled 2026-06: reddit.com returns 403 for ALL unauthenticated JSON
+    # endpoints (www/old/api hosts, any user-agent) from this network.
+    # The scraper already supports OAuth via PRAW: set REDDIT_CLIENT_ID and
+    # REDDIT_CLIENT_SECRET (script app, https://www.reddit.com/prefs/apps),
+    # then re-enable. docker-compose.yml already passes both env vars.
+    enabled: false
     base_url: "https://www.reddit.com"
     start_urls:
       - "https://www.reddit.com/r/Justrolledintotheshop/top/?t=all"
@@ -568,7 +602,12 @@ sources:
 
   - name: "reddit_wrenching"
     type: "forum"
-    enabled: true
+    # Disabled 2026-06: reddit.com returns 403 for ALL unauthenticated JSON
+    # endpoints (www/old/api hosts, any user-agent) from this network.
+    # The scraper already supports OAuth via PRAW: set REDDIT_CLIENT_ID and
+    # REDDIT_CLIENT_SECRET (script app, https://www.reddit.com/prefs/apps),
+    # then re-enable. docker-compose.yml already passes both env vars.
+    enabled: false
     base_url: "https://www.reddit.com"
     start_urls:
       - "https://www.reddit.com/r/wrenching/top/?t=all"
@@ -584,7 +623,12 @@ sources:
 
   - name: "reddit_automechanic"
     type: "forum"
-    enabled: true
+    # Disabled 2026-06: reddit.com returns 403 for ALL unauthenticated JSON
+    # endpoints (www/old/api hosts, any user-agent) from this network.
+    # The scraper already supports OAuth via PRAW: set REDDIT_CLIENT_ID and
+    # REDDIT_CLIENT_SECRET (script app, https://www.reddit.com/prefs/apps),
+    # then re-enable. docker-compose.yml already passes both env vars.
+    enabled: false
     base_url: "https://www.reddit.com"
     start_urls:
       - "https://www.reddit.com/r/AutoMechanic/top/?t=all"
@@ -600,7 +644,12 @@ sources:
 
   - name: "reddit_cars"
     type: "forum"
-    enabled: true
+    # Disabled 2026-06: reddit.com returns 403 for ALL unauthenticated JSON
+    # endpoints (www/old/api hosts, any user-agent) from this network.
+    # The scraper already supports OAuth via PRAW: set REDDIT_CLIENT_ID and
+    # REDDIT_CLIENT_SECRET (script app, https://www.reddit.com/prefs/apps),
+    # then re-enable. docker-compose.yml already passes both env vars.
+    enabled: false
     base_url: "https://www.reddit.com"
     start_urls:
       - "https://www.reddit.com/r/cars/top/?t=all"
@@ -681,7 +730,9 @@ sources:
 
   - name: "automd"
     type: "technical"
-    enabled: true
+    # Disabled 2026-06: https://www.automd.com/repair-guides/ returns an empty
+    # 114-byte stub (no anchors, no content) — the guides section appears dead.
+    enabled: false
     base_url: "https://www.automd.com"
     start_urls:
       - "https://www.automd.com/repair-guides/"
@@ -723,7 +774,12 @@ sources:
   # =========================================================================
   - name: "reddit_askmechanics"
     type: "forum"
-    enabled: true
+    # Disabled 2026-06: reddit.com returns 403 for ALL unauthenticated JSON
+    # endpoints (www/old/api hosts, any user-agent) from this network.
+    # The scraper already supports OAuth via PRAW: set REDDIT_CLIENT_ID and
+    # REDDIT_CLIENT_SECRET (script app, https://www.reddit.com/prefs/apps),
+    # then re-enable. docker-compose.yml already passes both env vars.
+    enabled: false
     base_url: "https://www.reddit.com"
     start_urls:
       - "https://www.reddit.com/r/AskMechanics/top/?t=all"
@@ -739,7 +795,12 @@ sources:
 
   - name: "reddit_trucks"
     type: "forum"
-    enabled: true
+    # Disabled 2026-06: reddit.com returns 403 for ALL unauthenticated JSON
+    # endpoints (www/old/api hosts, any user-agent) from this network.
+    # The scraper already supports OAuth via PRAW: set REDDIT_CLIENT_ID and
+    # REDDIT_CLIENT_SECRET (script app, https://www.reddit.com/prefs/apps),
+    # then re-enable. docker-compose.yml already passes both env vars.
+    enabled: false
     base_url: "https://www.reddit.com"
     start_urls:
       - "https://www.reddit.com/r/Trucks/top/?t=all"
@@ -755,7 +816,12 @@ sources:
 
   - name: "reddit_diyauto"
     type: "forum"
-    enabled: true
+    # Disabled 2026-06: reddit.com returns 403 for ALL unauthenticated JSON
+    # endpoints (www/old/api hosts, any user-agent) from this network.
+    # The scraper already supports OAuth via PRAW: set REDDIT_CLIENT_ID and
+    # REDDIT_CLIENT_SECRET (script app, https://www.reddit.com/prefs/apps),
+    # then re-enable. docker-compose.yml already passes both env vars.
+    enabled: false
     base_url: "https://www.reddit.com"
     start_urls:
       - "https://www.reddit.com/r/diyauto/top/?t=all"
@@ -807,12 +873,13 @@ sources:
     priority: 2
     rate_limit: 5.0
     scrape_interval_hours: 12
-    max_pages_per_round: 300
+    max_pages_per_round: 60  # serialized FlareSolverr budget (~1 page/min)
     use_playwright: true
     cloudflare_protected: true
     selectors:
-      thread_list: "a.structItem-title"
-      thread_title: "h1.p-title-value"
+      # XenForo 2: structItem-title is the wrapping div's class, not the <a>'s.
+      thread_list: ".structItem-title a"
+      thread_title: "h1"
       post_content: ".message-body .bbWrapper"
       post_author: "a.username"
       post_date: "time.u-dt"
@@ -830,12 +897,14 @@ sources:
     priority: 2
     rate_limit: 5.0
     scrape_interval_hours: 12
-    max_pages_per_round: 300
+    max_pages_per_round: 60  # serialized FlareSolverr budget (~1 page/min)
     use_playwright: true
     cloudflare_protected: true
     selectors:
-      thread_list: "a.structItem-title"
-      thread_title: "h1.p-title-value"
+      # XenForo 2: structItem-title is the wrapping div's class, not the <a>'s.
+      # thread_title: this theme uses h1.MessageCard__thread-title, so match any h1.
+      thread_list: ".structItem-title a"
+      thread_title: "h1"
       post_content: ".message-body .bbWrapper"
       post_author: "a.username"
       post_date: "time.u-dt"
@@ -845,24 +914,26 @@ sources:
     type: "forum"
     enabled: true
     base_url: "https://www.f150forum.com"
+    # vBulletin board (NOT XenForo): subforums live at /fN/; the old
+    # /forums/...-N/ URLs just bounce to the homepage.
     start_urls:
-      - "https://www.f150forum.com/forums/general-f150-discussion.4/"
-      - "https://www.f150forum.com/forums/5-0l-v8-technical-discussion.15/"
-      - "https://www.f150forum.com/forums/f-150-engine-technical-discussion.82/"
+      - "https://www.f150forum.com/f2/"   # General F150 Discussion
+      - "https://www.f150forum.com/f11/"  # Engine / Drivetrain Talk
+      - "https://www.f150forum.com/f12/"  # Maintenance Shop
     category: "forum"
     priority: 2
     rate_limit: 5.0
     scrape_interval_hours: 12
-    max_pages_per_round: 300
+    max_pages_per_round: 60  # serialized FlareSolverr budget (~1 page/min)
     use_playwright: true
     cloudflare_protected: true
     selectors:
-      thread_list: "a.structItem-title"
-      thread_title: "h1.p-title-value"
-      post_content: ".message-body .bbWrapper"
-      post_author: "a.username"
-      post_date: "time.u-dt"
-      pagination_next: "a.pageNav-jump--next"
+      thread_list: "a[id^='thread_title_']"
+      thread_title: "h1"
+      post_content: "div[id^='post_message_']"
+      post_author: "a.bigusername"
+      post_date: "time"
+      pagination_next: "a[rel='next']"
 
   # =========================================================================
   # TECHNICAL / CONTENT

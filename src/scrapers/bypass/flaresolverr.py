@@ -21,6 +21,12 @@ logger = get_logger("flaresolverr")
 
 DEFAULT_URL = "http://localhost:8191"
 
+# FlareSolverr runs a single browser and handles requests sequentially; if
+# several scrapers POST concurrently, queued requests burn their entire
+# maxTimeout budget waiting and then fail with a solve-timeout. Serialize all
+# fetches process-wide so each request gets the browser to itself.
+_fetch_lock = asyncio.Lock()
+
 
 class FlareSolverrClient:
     """Thin async wrapper around the FlareSolverr v1 API."""
@@ -92,7 +98,8 @@ class FlareSolverrClient:
         if session_id:
             payload["session"] = session_id
         try:
-            data = await self._command(payload)
+            async with _fetch_lock:
+                data = await self._command(payload)
         except Exception as e:
             logger.warning("flaresolverr_fetch_error", url=url, error=str(e))
             return None, 0

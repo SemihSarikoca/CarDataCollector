@@ -154,7 +154,8 @@ class GenericContentScraper(BaseScraper):
         # Gereksiz elementleri kaldır
         for unwanted in content_el.select(
             "script, style, .ad, .advertisement, .social-share,"
-            " .related, nav, .comments, .wp-block-embed"
+            " .related, nav, .comments, .wp-block-embed,"
+            " form, select, option, button, input, label"
         ):
             unwanted.decompose()
 

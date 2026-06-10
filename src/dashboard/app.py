@@ -1233,6 +1233,93 @@ def pipeline_status():
     })
 
 
+@app.route("/api/pipeline/overview")
+def pipeline_overview():
+    """Read-only aggregate for the dashboard status card: process status,
+    latest round (with live counters for running rounds), loop statuses and
+    a few headline stats — one round-trip instead of five."""
+    running, pid = _pipeline_running()
+    meta = _read_pid_meta()
+    with _pipeline_lock:
+        single = _pipeline_state["single_round_running"]
+    paused = False
+    rc = _state["redis_client"]
+    if rc:
+        try:
+            paused = bool(rc.get(_PIPELINE_PAUSE_KEY))
+        except Exception:
+            pass
+
+    out: dict = {
+        "server_time": datetime.now(timezone.utc).isoformat(),
+        "pipeline": {
+            "running": running,
+            "pid": pid,
+            "command": meta.get("command"),
+            "started_at": meta.get("started_at"),
+            "single_round_running": single,
+            "paused": paused,
+        },
+        "scrape_loop": _scrape_mgr.status(),
+        "qa_loop": _qa_loop_mgr.status(),
+        "latest_round": None,
+        "enabled_sources": 0,
+        "stats": None,
+    }
+
+    try:
+        rnd = _query("SELECT * FROM rounds ORDER BY round_number DESC LIMIT 1", one=True)
+        if rnd:
+            for k in ("start_time", "end_time"):
+                if rnd.get(k):
+                    rnd[k] = rnd[k].isoformat()
+            # Round counters are only persisted at complete_round(), so for a
+            # running round compute live numbers from scraped_data instead.
+            if rnd.get("status") == "running":
+                live = _query("""
+                    SELECT COUNT(*) AS scraped,
+                           SUM(CASE WHEN is_duplicate THEN 1 ELSE 0 END) AS duplicates,
+                           COUNT(DISTINCT source_name) AS sources_touched,
+                           MAX(date_scraped) AS last_item_at
+                    FROM scraped_data WHERE round_number = %s
+                """, (rnd["round_number"],), one=True) or {}
+                rnd["live"] = {
+                    "scraped": int(live.get("scraped") or 0),
+                    "duplicates": int(live.get("duplicates") or 0),
+                    "sources_touched": int(live.get("sources_touched") or 0),
+                    "last_item_at": live["last_item_at"].isoformat() if live.get("last_item_at") else None,
+                }
+            out["latest_round"] = rnd
+    except Exception as e:
+        out["latest_round_error"] = str(e)
+
+    try:
+        out["enabled_sources"] = int((_query(
+            "SELECT COUNT(*) AS n FROM sources WHERE enabled = true", one=True
+        ) or {}).get("n") or 0)
+        s = _query("""
+            SELECT
+                (SELECT COUNT(*) FROM scraped_data WHERE is_duplicate = false) AS unique_documents,
+                (SELECT COUNT(*) FROM qa_pairs) AS total_qa_pairs,
+                (SELECT COUNT(*) FROM scraped_data
+                   WHERE is_duplicate = false AND qa_count = 0) AS pending_qa,
+                (SELECT MAX(date_scraped) FROM scraped_data) AS last_scrape,
+                (SELECT COUNT(*) FROM scraped_data
+                   WHERE date_scraped >= NOW() - INTERVAL '10 minutes') AS docs_last_10min
+        """, one=True) or {}
+        out["stats"] = {
+            "unique_documents": int(s.get("unique_documents") or 0),
+            "total_qa_pairs": int(s.get("total_qa_pairs") or 0),
+            "pending_qa_documents": int(s.get("pending_qa") or 0),
+            "last_scrape": s["last_scrape"].isoformat() if s.get("last_scrape") else None,
+            "docs_last_10min": int(s.get("docs_last_10min") or 0),
+        }
+    except Exception as e:
+        out["stats_error"] = str(e)
+
+    return jsonify(out)
+
+
 @app.route("/api/pipeline/start", methods=["POST"])
 def pipeline_start():
     running, pid = _pipeline_running()

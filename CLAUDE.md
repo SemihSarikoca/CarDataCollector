@@ -46,8 +46,12 @@ docker-compose up -d
 
 # Ollama is commented out in docker-compose.yml by default.
 # Run it separately and set OLLAMA_URL env var, or uncomment the service.
-ollama pull gemma3:4b    # primary Q/A model (configured in settings.yaml)
-ollama pull gemma3:12b   # fallback / use if you have enough VRAM
+ollama pull qwen2.5:3b   # active Q/A model (configured in settings.yaml) — ~1.9 GB, runs on M2/8 GB
+
+# Optional heavier models — only if you have the RAM/VRAM. To use one,
+# point qa_generator.ollama_model_name in config/settings.yaml at it:
+# ollama pull gemma3:4b    # ~3.3 GB — too heavy for 8 GB RAM, use with 16 GB+
+# ollama pull gemma3:12b   # ~8.1 GB — needs a lot of VRAM
 ```
 
 Environment variables override `config/settings.yaml` credentials:
@@ -87,7 +91,7 @@ Environment variables override `config/settings.yaml` credentials:
 `StorageManager.store_item()` is called per scraped item. It runs the dedup check inline, writes HTML to `data/raw/html/`, and inserts/updates the `scraped_data` table.
 
 ### Q/A generation (`src/qa_generator/__init__.py`)
-Pulls unprocessed unique documents from PostgreSQL and sends them to Ollama (`gemma3:4b` by default, fallback `gemma3:12b`). Output is stored in `qa_pairs` table and written to `data/qa_output/` as JSONL.
+Pulls unprocessed unique documents from PostgreSQL and sends them to Ollama (`qwen2.5:3b` by default, set via `qa_generator.ollama_model_name`/`fallback_model_name` in `settings.yaml`). Larger models like `gemma3:4b`/`gemma3:12b` can be swapped in there if you have the RAM. Output is stored in `qa_pairs` table and written to `data/qa_output/` as JSONL.
 
 ### Database (`src/database/__init__.py`)
 `DatabaseManager` — thin asyncpg connection-pool wrapper shared by all components. DSN resolved from `DATABASE_URL` env var or `config/settings.yaml`. Schema lives in `scripts/init-db.sql`.

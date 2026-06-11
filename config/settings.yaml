@@ -170,18 +170,35 @@ qa_generator:
   max_context_chars: 4000
   request_timeout_seconds: 120
   concurrency: 1
+  # Documents scoring below this (estimate_content_quality, 0-1) are skipped
+  # before the LLM is called. Raised from the old hardcoded 0.3 — short reddit
+  # photo/chat posts scored 0.4-0.6 and produced junk Q/A that tanked averages.
+  min_doc_quality: 0.6
+  # Minimum chars for a self-contained fine-tuning question; shorter ones are
+  # terse fragments and get dropped post-generation.
+  min_question_chars: 60
+  # Photo/meme/chat sources with too little usable text per item for technical
+  # Q/A. Skipped entirely. mechanicadvice/askmechanics stay enabled (real text).
+  skip_sources:
+    - "reddit_justrolledintotheshop"
+    - "reddit_trucks"
+    - "reddit_cars"
   system_prompt: |
     You are an automotive technical expert. From the given English automotive
     technical text or forum discussion, generate high-quality question-answer
     pairs for LLM fine-tuning.
-    
+
     Rules:
-    1. Questions should be in natural English
-    2. Answers must be technically accurate and detailed
-    3. Each Q/A pair should be independently understandable
-    4. Include make, model, year information if available
-    5. Focus on specific technical details rather than general information
-    6. Return in JSON format: [{"question": "...", "answer": "..."}]
+    1. Each question must be a complete, self-contained English sentence of
+       12-25 words — never a terse fragment like "What are quad tips?".
+    2. The question must carry its own context: name the vehicle make, model and
+       year when the text mentions them, plus the specific component or symptom.
+    3. Answers must be technically accurate and detailed (2-3+ sentences).
+    4. Each Q/A pair must be independently understandable WITHOUT the source text.
+    5. Focus on specific technical details rather than general trivia.
+    6. NEVER reference "the post", "the text", "the author", "the comment", a
+       username or forum handle. Write standalone automotive knowledge.
+    7. Return ONLY a JSON array: [{"question": "...", "answer": "..."}]
 
 # -----------------------------------------------------------------------------
 # Source Definitions - English Automotive Sites

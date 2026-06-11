@@ -29,6 +29,21 @@ _DELETED_RE = re.compile(r'\[(?:deleted|removed)\]', re.I)
 _MULTISPACE_RE = re.compile(r'[ \t]{2,}')
 _MULTINEWLINE_RE = re.compile(r'\n{3,}')
 
+# Questions that lean on the source document instead of standing on their own.
+# A fine-tuning question like "What does the post say about X?" is unusable —
+# the model won't have "the post" at inference time. Reject these at generation
+# time and purge existing ones from the DB (same predicate used in cleanup SQL).
+_LEAK_RE = re.compile(
+    r'\b(the post|the text|the author|the comment|this post|this text|'
+    r'this comment|the user|the discussion|the thread|the article|'
+    r'mentioned|someone says|the passage)\b',
+    re.I,
+)
+# Minimum question length (chars) for a self-contained fine-tuning question.
+# qwen2.5:3b emits ~80-char questions on average; anything under 60 is a terse
+# fragment ("What are quad tips?") with no vehicle/context anchor.
+_MIN_QUESTION_CHARS = 60
+
 
 class QAGenerator:
     """
@@ -57,6 +72,15 @@ class QAGenerator:
         self.system_prompt = qa_config.get("system_prompt", self._default_system_prompt())
         self.concurrency = max(1, int(qa_config.get("concurrency", 2)))
 
+        # Documents below this source-quality score are skipped before hitting the
+        # LLM (short/non-technical text yields junk Q/A). Was hardcoded 0.3.
+        self.min_doc_quality = float(qa_config.get("min_doc_quality", 0.6))
+        # Sources that are photo/meme/chat-heavy: too little usable text per item
+        # to produce self-contained technical Q/A. Skipped entirely.
+        self.skip_sources = set(qa_config.get("skip_sources", []))
+        # Minimum chars for a self-contained question; defaults to module constant.
+        self.min_question_chars = int(qa_config.get("min_question_chars", _MIN_QUESTION_CHARS))
+
         timeout_seconds = qa_config.get("request_timeout_seconds", 120)
         self._client = httpx.AsyncClient(timeout=timeout_seconds)
         self._active_model = self.model_name
@@ -69,13 +93,15 @@ automotive technical text or forum discussion, generate high-quality
 question-answer pairs for LLM fine-tuning.
 
 Rules:
-1. Questions must be in natural English
-2. Answers must be technically accurate and detailed
-3. Each Q/A pair must be independently understandable
-4. Include make, model, year if mentioned
-5. Focus on specific technical details, not general information
-6. NEVER mention usernames, forum handles, post authors, or "the post/comment".
-   Write generic automotive knowledge — never address a specific user by name.
+1. Questions must be in natural English, phrased as a complete, self-contained
+   sentence of 12-25 words. Never write a terse fragment like "What are quad tips?".
+2. Each question must carry its own context: name the vehicle make, model and
+   year whenever the text mentions them, and the specific symptom or component.
+3. Answers must be technically accurate and detailed (at least 2-3 sentences).
+4. Each Q/A pair must be independently understandable WITHOUT the source text.
+5. Focus on specific technical details, not general trivia.
+6. NEVER reference "the post", "the text", "the author", "the comment", a
+   username or forum handle. Write generic automotive knowledge that stands alone.
 7. Return ONLY a valid JSON array, nothing else: [{"question": "...", "answer": "..."}]"""
 
     def _clean_text(self, text: str) -> str:
@@ -156,9 +182,12 @@ Title: {title}
 ---TEXT END---
 
 Generate between {self.min_qa_per_doc} and {self.max_qa_per_doc} high-quality
-Q/A pairs. Each pair must be independently understandable. Answers must be
-detailed and technical. Do NOT reference usernames, forum handles, or "the
-post/comment" — write questions as general automotive knowledge.
+Q/A pairs. Requirements for EVERY pair:
+- The question is a complete sentence of 12-25 words, self-contained, and names
+  the vehicle make/model/year and the component or symptom when the text gives them.
+- The answer is detailed and technical (2-3+ sentences).
+- The pair makes sense on its own, with NO reference to "the post", "the text",
+  "the author", "the comment", usernames or forum handles.
 
 Return ONLY a valid JSON array, no markdown, no commentary:
 [{{"question": "...", "answer": "..."}}]"""
@@ -247,11 +276,23 @@ Return ONLY a valid JSON array, no markdown, no commentary:
             if isinstance(item, dict) and "question" in item and "answer" in item:
                 q = str(item["question"]).strip()
                 a = str(item["answer"]).strip()
-                # Minimum kalite kontrolü
-                if len(q) > 10 and len(a) > 20:
+                if self._is_acceptable_question(q) and len(a) > 20:
                     valid_pairs.append({"question": q, "answer": a})
 
         return valid_pairs
+
+    def _is_acceptable_question(self, q: str) -> bool:
+        """Reject terse fragments and questions that lean on the source document.
+
+        A fine-tuning question must stand on its own: long enough to carry context
+        and free of "the post / the author / mentioned" references that have no
+        meaning without the original text.
+        """
+        if len(q) < self.min_question_chars:
+            return False
+        if _LEAK_RE.search(q):
+            return False
+        return True
 
     def _salvage_pairs(self, text: str) -> list[dict]:
         """Bozuk/yarıda kesilmiş JSON'dan tam {question, answer} objelerini kurtar."""
@@ -274,6 +315,11 @@ Return ONLY a valid JSON array, no markdown, no commentary:
         """Process one document: fetch text, run Ollama, insert Q/A pairs."""
         result = {"processed": 0, "qa_generated": 0, "failed": 0}
         try:
+            source_name = doc.get("source_name", "")
+            if source_name in self.skip_sources:
+                logger.debug("source_skipped_for_qa", doc_id=doc["id"], source=source_name)
+                return result
+
             text = doc.get("content_text") or ""
             if (not text or len(text) < 100) and doc.get("file_path_html"):
                 text = await self.storage.get_document_text(doc["file_path_html"])
@@ -282,7 +328,7 @@ Return ONLY a valid JSON array, no markdown, no commentary:
                 return result
 
             quality = estimate_content_quality(text)
-            if quality < 0.3:
+            if quality < self.min_doc_quality:
                 logger.debug("low_quality_skipped", doc_id=doc["id"], quality=quality)
                 return result
 

@@ -232,7 +232,11 @@ def get_stats():
                 (SELECT COUNT(*) FROM scraped_data WHERE is_duplicate = true) AS duplicate_documents,
                 (SELECT COUNT(*) FROM qa_pairs) AS total_qa_pairs,
                 (SELECT COUNT(*) FROM urls_visited) AS total_urls_visited,
-                (SELECT COUNT(DISTINCT source_name) FROM scraped_data) AS active_sources,
+                -- enabled sources in the current roster; counting DISTINCT
+                -- source_name from scraped_data inflated this with historical
+                -- data from since-removed sources (25/24 display bug)
+                (SELECT COUNT(*) FROM sources WHERE enabled = true) AS active_sources,
+                (SELECT COUNT(*) FROM sources) AS roster_sources,
                 (SELECT MAX(date_scraped) FROM scraped_data) AS last_scrape,
                 (SELECT MAX(round_number) FROM rounds) AS last_round,
                 (SELECT COUNT(*) FROM scraped_data
@@ -250,7 +254,7 @@ def get_stats():
             "total_qa_pairs": row.get("total_qa_pairs") or 0,
             "total_urls_visited": row.get("total_urls_visited") or 0,
             "active_sources": row.get("active_sources") or 0,
-            "total_sources": len(configured),
+            "total_sources": row.get("roster_sources") or len(configured),
             "pending_qa_documents": row.get("pending_qa") or 0,
             "last_scrape": row.get("last_scrape").isoformat() if row.get("last_scrape") else None,
             "last_round": row.get("last_round") or 0,
@@ -669,14 +673,19 @@ def trends():
 @app.route("/api/source-distribution")
 def source_distribution():
     try:
+        # Historical data from sources since removed from the roster gets
+        # bucketed into one "(removed)" slice instead of inflating the chart
+        # with sources that no longer exist.
         rows = _query("""
-            SELECT source_name, COUNT(*) AS n
-            FROM scraped_data
-            WHERE is_duplicate = false
-            GROUP BY source_name ORDER BY n DESC
+            SELECT CASE WHEN s.name IS NULL THEN '(removed)' ELSE sd.source_name END AS label,
+                   COUNT(*) AS n
+            FROM scraped_data sd
+            LEFT JOIN sources s ON s.name = sd.source_name
+            WHERE sd.is_duplicate = false
+            GROUP BY 1 ORDER BY n DESC
         """) or []
         return jsonify({
-            "labels": [r["source_name"] for r in rows],
+            "labels": [r["label"] for r in rows],
             "values": [int(r["n"]) for r in rows],
         })
     except Exception as e:

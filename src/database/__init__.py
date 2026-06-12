@@ -255,6 +255,21 @@ class DatabaseManager:
             """, limit)
             return [_row_to_dict(r) for r in rows]
 
+    async def mark_doc_qa_skipped(self, doc_id, reason: str = ""):
+        """Take a document out of the Q/A queue permanently. Without this,
+        get_documents_for_qa() returns the same ineligible docs (low quality,
+        skip-listed source) every batch and the Q/A loop spins producing 0."""
+        async with self._pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE scraped_data
+                SET pipeline_stage = 'qa_skipped',
+                    date_processed = NOW(),
+                    updated_at = NOW(),
+                    metadata = COALESCE(metadata, '{}'::jsonb)
+                               || jsonb_build_object('qa_skip_reason', $2::text)
+                WHERE id = $1
+            """, doc_id, reason)
+
     async def get_non_duplicate_documents(self, batch_size: int = 1000,
                                            offset: int = 0,
                                            since: Optional[datetime] = None) -> list[dict]:

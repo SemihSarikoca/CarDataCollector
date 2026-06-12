@@ -235,31 +235,6 @@ sources:
       comment_content: "div[data-testid='comment']"
       pagination_next: "button:has-text('Next')"
 
-  - name: "reddit_cartalk"
-    type: "forum"
-    # Disabled 2026-06: reddit.com returns 403 for ALL unauthenticated JSON
-    # endpoints (www/old/api hosts, any user-agent) from this network.
-    # The scraper already supports OAuth via PRAW: set REDDIT_CLIENT_ID and
-    # REDDIT_CLIENT_SECRET (script app, https://www.reddit.com/prefs/apps),
-    # then re-enable. docker-compose.yml already passes both env vars.
-    enabled: false
-    base_url: "https://www.reddit.com"
-    start_urls:
-      - "https://www.reddit.com/r/Cartalk/top/?t=all"
-      - "https://www.reddit.com/r/Cartalk/new/"
-    category: "forum"
-    priority: 1
-    rate_limit: 2.0
-    scrape_interval_hours: 6
-    max_pages_per_round: 200
-    use_playwright: false
-    cloudflare_protected: false
-    selectors:
-      thread_list: "a[data-testid='post-title']"
-      thread_title: "h1"
-      post_content: "div[data-testid='post-content']"
-      comment_content: "div[data-testid='comment']"
-
   - name: "bobistheoilguy"
     type: "forum"
     enabled: true
@@ -287,7 +262,9 @@ sources:
 
   - name: "automotiveforums"
     type: "forum"
-    enabled: true
+    # Disabled 2026-06: CF 403 on every fetch; jeepforum/f150forum/toyotanation
+    # already cover the forum genre via FlareSolverr.
+    enabled: false
     base_url: "https://www.automotiveforums.com"
     start_urls:
       - "https://www.automotiveforums.com/forums/"
@@ -303,28 +280,6 @@ sources:
       thread_title: "h1.entry-title"
       post_content: "div.post-body"
       pagination_next: "a.next"
-
-  - name: "cargurus_forum"
-    type: "forum"
-    # Disabled: even via FlareSolverr (which clears Cloudflare), cargurus' own
-    # anti-bot layer returns an HTTP 418 block page with no discussion content,
-    # so no selector can extract anything. Re-enable only with a stronger fetch path.
-    enabled: false
-    base_url: "https://www.cargurus.com"
-    start_urls:
-      - "https://www.cargurus.com/Cars/Discussion-General"
-    category: "forum"
-    priority: 2
-    rate_limit: 5.0
-    scrape_interval_hours: 12
-    max_pages_per_round: 60  # serialized FlareSolverr budget (~1 page/min)
-    use_playwright: true
-    cloudflare_protected: true
-    selectors:
-      thread_list: "a.discussion-title"
-      thread_title: "h1.discussion-title"
-      post_content: "div.discussion-body"
-      pagination_next: "a.next-page"
 
   # =========================================================================
   # TECHNICAL/REPAIR SITES
@@ -350,51 +305,6 @@ sources:
       article_list: "a[href^='/symptoms/'], a[href*='repairpal.com/symptoms/'], a[href^='/problems/'], a[href*='repairpal.com/problems/']"
       article_title: "h1"
       article_content: "div#main-container"
-      pagination_next: "a.next"
-
-  - name: "carcarekiosk"
-    type: "technical"
-    # Disabled 2026-06: /video redirects to the homepage; the site is a
-    # Make → Model/Year → video-page hierarchy whose pages are just video link
-    # indexes with no instructional text. The one-level generic scraper can't
-    # extract Q/A-worthy text from it.
-    enabled: false
-    base_url: "https://www.carcarekiosk.com"
-    start_urls:
-      - "https://www.carcarekiosk.com/video"
-    category: "technical"
-    priority: 2
-    rate_limit: 5.0
-    scrape_interval_hours: 24
-    max_pages_per_round: 300
-    use_playwright: false
-    cloudflare_protected: false
-    selectors:
-      article_list: "a.video-link"
-      article_title: "h1.video-title"
-      article_content: "div.video-description"
-      pagination_next: "a.next"
-
-  - name: "autozone_guides"
-    type: "technical"
-    # Disabled: autozone.com serves a JS-only SPA shell (country-selector page,
-    # zero anchors / zero article content) even through FlareSolverr with the
-    # challenge cleared. Needs a real browser-rendering fetch path to be usable.
-    enabled: false
-    base_url: "https://www.autozone.com"
-    start_urls:
-      - "https://www.autozone.com/diy/repair-guides"
-    category: "technical"
-    priority: 2
-    rate_limit: 5.0
-    scrape_interval_hours: 24
-    max_pages_per_round: 60  # serialized FlareSolverr budget (~1 page/min)
-    use_playwright: true
-    cloudflare_protected: true
-    selectors:
-      article_list: "a.guide-link"
-      article_title: "h1"
-      article_content: "div.guide-content"
       pagination_next: "a.next"
 
   # =========================================================================
@@ -596,95 +506,12 @@ sources:
   # =========================================================================
   # FORUMS - Additional Reddit subreddits
   # =========================================================================
-  - name: "reddit_justrolledintotheshop"
-    type: "forum"
-    # Disabled 2026-06: reddit.com returns 403 for ALL unauthenticated JSON
-    # endpoints (www/old/api hosts, any user-agent) from this network.
-    # The scraper already supports OAuth via PRAW: set REDDIT_CLIENT_ID and
-    # REDDIT_CLIENT_SECRET (script app, https://www.reddit.com/prefs/apps),
-    # then re-enable. docker-compose.yml already passes both env vars.
-    enabled: false
-    base_url: "https://www.reddit.com"
-    start_urls:
-      - "https://www.reddit.com/r/Justrolledintotheshop/top/?t=all"
-      - "https://www.reddit.com/r/Justrolledintotheshop/new/"
-    category: "forum"
-    priority: 1
-    rate_limit: 2.0
-    scrape_interval_hours: 6
-    max_pages_per_round: 200
-    use_playwright: false
-    cloudflare_protected: false
-    selectors: {}
-
-  - name: "reddit_wrenching"
-    type: "forum"
-    # Disabled 2026-06: reddit.com returns 403 for ALL unauthenticated JSON
-    # endpoints (www/old/api hosts, any user-agent) from this network.
-    # The scraper already supports OAuth via PRAW: set REDDIT_CLIENT_ID and
-    # REDDIT_CLIENT_SECRET (script app, https://www.reddit.com/prefs/apps),
-    # then re-enable. docker-compose.yml already passes both env vars.
-    enabled: false
-    base_url: "https://www.reddit.com"
-    start_urls:
-      - "https://www.reddit.com/r/wrenching/top/?t=all"
-      - "https://www.reddit.com/r/wrenching/new/"
-    category: "forum"
-    priority: 1
-    rate_limit: 2.0
-    scrape_interval_hours: 6
-    max_pages_per_round: 200
-    use_playwright: false
-    cloudflare_protected: false
-    selectors: {}
-
-  - name: "reddit_automechanic"
-    type: "forum"
-    # Disabled 2026-06: reddit.com returns 403 for ALL unauthenticated JSON
-    # endpoints (www/old/api hosts, any user-agent) from this network.
-    # The scraper already supports OAuth via PRAW: set REDDIT_CLIENT_ID and
-    # REDDIT_CLIENT_SECRET (script app, https://www.reddit.com/prefs/apps),
-    # then re-enable. docker-compose.yml already passes both env vars.
-    enabled: false
-    base_url: "https://www.reddit.com"
-    start_urls:
-      - "https://www.reddit.com/r/AutoMechanic/top/?t=all"
-      - "https://www.reddit.com/r/AutoMechanic/new/"
-    category: "forum"
-    priority: 1
-    rate_limit: 2.0
-    scrape_interval_hours: 6
-    max_pages_per_round: 200
-    use_playwright: false
-    cloudflare_protected: false
-    selectors: {}
-
-  - name: "reddit_cars"
-    type: "forum"
-    # Disabled 2026-06: reddit.com returns 403 for ALL unauthenticated JSON
-    # endpoints (www/old/api hosts, any user-agent) from this network.
-    # The scraper already supports OAuth via PRAW: set REDDIT_CLIENT_ID and
-    # REDDIT_CLIENT_SECRET (script app, https://www.reddit.com/prefs/apps),
-    # then re-enable. docker-compose.yml already passes both env vars.
-    enabled: false
-    base_url: "https://www.reddit.com"
-    start_urls:
-      - "https://www.reddit.com/r/cars/top/?t=all"
-      - "https://www.reddit.com/r/cars/new/"
-    category: "forum"
-    priority: 2
-    rate_limit: 2.0
-    scrape_interval_hours: 8
-    max_pages_per_round: 200
-    use_playwright: false
-    cloudflare_protected: false
-    selectors: {}
-
   # =========================================================================
   # TECHNICAL - OBD Codes & Diagnostics
   # =========================================================================
   - name: "obd_codes"
     type: "technical"
+    # Direct fetch returns CF 403 (2026-06) — routed via FlareSolverr instead.
     enabled: true
     base_url: "https://obd-codes.com"
     start_urls:
@@ -693,9 +520,9 @@ sources:
     priority: 1
     rate_limit: 4.0
     scrape_interval_hours: 168
-    max_pages_per_round: 300
-    use_playwright: true
-    cloudflare_protected: false
+    max_pages_per_round: 60
+    use_playwright: false
+    cloudflare_protected: true
     selectors:
       article_list: "a[href*='/p/'], td a, .code-list a"
       article_title: "h1"
@@ -704,6 +531,7 @@ sources:
 
   - name: "autocodes"
     type: "technical"
+    # Direct fetch returns CF 403 (2026-06) — routed via FlareSolverr instead.
     enabled: true
     base_url: "https://www.autocodes.com"
     start_urls:
@@ -712,9 +540,9 @@ sources:
     priority: 1
     rate_limit: 4.0
     scrape_interval_hours: 168
-    max_pages_per_round: 400
-    use_playwright: true
-    cloudflare_protected: false
+    max_pages_per_round: 60
+    use_playwright: false
+    cloudflare_protected: true
     selectors:
       article_list: "a[href*='code-'], td a, .code-list a"
       article_title: "h1"
@@ -726,7 +554,9 @@ sources:
   # =========================================================================
   - name: "thecarconnection"
     type: "content"
-    enabled: true
+    # Disabled 2026-06: CF 403 on every fetch and content is car news/reviews —
+    # low Q/A value next to technical sources; not worth FlareSolverr budget.
+    enabled: false
     base_url: "https://www.thecarconnection.com"
     start_urls:
       - "https://www.thecarconnection.com/news/"
@@ -744,27 +574,6 @@ sources:
       article_content: "div.article-body, div.content, article"
       article_date: "time"
       pagination_next: "a.next, a[rel='next']"
-
-  - name: "automd"
-    type: "technical"
-    # Disabled 2026-06: https://www.automd.com/repair-guides/ returns an empty
-    # 114-byte stub (no anchors, no content) — the guides section appears dead.
-    enabled: false
-    base_url: "https://www.automd.com"
-    start_urls:
-      - "https://www.automd.com/repair-guides/"
-    category: "technical"
-    priority: 2
-    rate_limit: 5.0
-    scrape_interval_hours: 48
-    max_pages_per_round: 300
-    use_playwright: true
-    cloudflare_protected: false
-    selectors:
-      article_list: "a[href*='/repair-guide/']"
-      article_title: "h1"
-      article_content: "div.guide-content, div.repair-content, main"
-      pagination_next: "a.next"
 
   - name: "vehiclehistory"
     type: "technical"
@@ -805,48 +614,6 @@ sources:
     priority: 1
     rate_limit: 2.0
     scrape_interval_hours: 6
-    max_pages_per_round: 200
-    use_playwright: false
-    cloudflare_protected: false
-    selectors: {}
-
-  - name: "reddit_trucks"
-    type: "forum"
-    # Disabled 2026-06: reddit.com returns 403 for ALL unauthenticated JSON
-    # endpoints (www/old/api hosts, any user-agent) from this network.
-    # The scraper already supports OAuth via PRAW: set REDDIT_CLIENT_ID and
-    # REDDIT_CLIENT_SECRET (script app, https://www.reddit.com/prefs/apps),
-    # then re-enable. docker-compose.yml already passes both env vars.
-    enabled: false
-    base_url: "https://www.reddit.com"
-    start_urls:
-      - "https://www.reddit.com/r/Trucks/top/?t=all"
-      - "https://www.reddit.com/r/Trucks/new/"
-    category: "forum"
-    priority: 2
-    rate_limit: 2.0
-    scrape_interval_hours: 8
-    max_pages_per_round: 200
-    use_playwright: false
-    cloudflare_protected: false
-    selectors: {}
-
-  - name: "reddit_diyauto"
-    type: "forum"
-    # Disabled 2026-06: reddit.com returns 403 for ALL unauthenticated JSON
-    # endpoints (www/old/api hosts, any user-agent) from this network.
-    # The scraper already supports OAuth via PRAW: set REDDIT_CLIENT_ID and
-    # REDDIT_CLIENT_SECRET (script app, https://www.reddit.com/prefs/apps),
-    # then re-enable. docker-compose.yml already passes both env vars.
-    enabled: false
-    base_url: "https://www.reddit.com"
-    start_urls:
-      - "https://www.reddit.com/r/diyauto/top/?t=all"
-      - "https://www.reddit.com/r/diyauto/new/"
-    category: "forum"
-    priority: 2
-    rate_limit: 2.0
-    scrape_interval_hours: 8
     max_pages_per_round: 200
     use_playwright: false
     cloudflare_protected: false
@@ -1020,6 +787,79 @@ sources:
       article_content: "div.entry-content, div.post-content, article"
       article_date: "time"
       pagination_next: "a.next, a[rel='next']"
+
+  # =========================================================================
+  # TECHNICAL ARTICLES — added 2026-06 (same genre as mechanicbase/repairpal)
+  # =========================================================================
+  # aa1car.com — Larry Carley's technical library; ~500 plain-HTML articles on
+  # diagnostics, repair and systems. No CF, no JS. Content sits directly in
+  # <body> (1990s-style HTML) — the generic scraper's unwanted-element cleanup
+  # handles nav/ads.
+  - name: "aa1car"
+    type: "technical"
+    enabled: true
+    base_url: "https://www.aa1car.com"
+    start_urls:
+      - "https://www.aa1car.com/library.htm"
+    category: "technical"
+    priority: 1
+    rate_limit: 4.0
+    scrape_interval_hours: 168
+    max_pages_per_round: 40
+    use_playwright: false
+    cloudflare_protected: false
+    selectors:
+      article_list: "a[href*='/library/']"
+      article_title: "h1"
+      article_content: "body"
+
+  # oards.com — WordPress troubleshooting/diagnostics articles organised by
+  # system (engine, brakes, cooling...). Verified: listing 'article h2 a',
+  # content '.entry-content' (~17k chars/article).
+  - name: "oards"
+    type: "technical"
+    enabled: true
+    base_url: "https://oards.com"
+    start_urls:
+      - "https://oards.com/troubleshooting/engine-mechanical/"
+      - "https://oards.com/troubleshooting/brake-system/"
+      - "https://oards.com/troubleshooting/cooling-system/"
+      - "https://oards.com/troubleshooting/electrical-system/"
+      - "https://oards.com/troubleshooting/fuel-system/"
+      - "https://oards.com/troubleshooting/ignition-system/"
+      - "https://oards.com/troubleshooting/ac-heating/"
+    category: "technical"
+    priority: 1
+    rate_limit: 4.0
+    scrape_interval_hours: 72
+    max_pages_per_round: 60
+    use_playwright: false
+    cloudflare_protected: false
+    selectors:
+      article_list: "article h2 a, .entry-title a"
+      article_title: "h1"
+      article_content: ".entry-content"
+      pagination_next: "a.next, .nav-links a.next, a[rel='next']"
+
+  # samarins.com — used-car inspection & maintenance guides, plain HTML.
+  # Content sits directly in <body> (like aa1car); ~9k chars/article.
+  - name: "samarins"
+    type: "technical"
+    enabled: true
+    base_url: "https://www.samarins.com"
+    start_urls:
+      - "https://www.samarins.com/"
+    category: "technical"
+    priority: 2
+    rate_limit: 4.0
+    scrape_interval_hours: 168
+    max_pages_per_round: 40
+    use_playwright: false
+    cloudflare_protected: false
+    selectors:
+      article_list: "a[href*='check/'], a[href*='maintenance/'], a[href*='diagnose/'], a[href*='glossary/']"
+      article_title: "h1"
+      article_content: "body"
 
 # -----------------------------------------------------------------------------
 # Pipeline Settings

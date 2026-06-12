@@ -313,11 +313,13 @@ Return ONLY a valid JSON array, no markdown, no commentary:
 
     async def _process_single_doc(self, doc: dict, semaphore: asyncio.Semaphore) -> dict:
         """Process one document: fetch text, run Ollama, insert Q/A pairs."""
-        result = {"processed": 0, "qa_generated": 0, "failed": 0}
+        result = {"processed": 0, "qa_generated": 0, "failed": 0, "skipped": 0}
         try:
             source_name = doc.get("source_name", "")
             if source_name in self.skip_sources:
                 logger.debug("source_skipped_for_qa", doc_id=doc["id"], source=source_name)
+                await self.db.mark_doc_qa_skipped(doc["id"], "source_skiplist")
+                result["skipped"] = 1
                 return result
 
             text = doc.get("content_text") or ""
@@ -325,11 +327,15 @@ Return ONLY a valid JSON array, no markdown, no commentary:
                 text = await self.storage.get_document_text(doc["file_path_html"])
 
             if not text or len(text) < 100:
+                await self.db.mark_doc_qa_skipped(doc["id"], "text_too_short")
+                result["skipped"] = 1
                 return result
 
             quality = estimate_content_quality(text)
             if quality < self.min_doc_quality:
                 logger.debug("low_quality_skipped", doc_id=doc["id"], quality=quality)
+                await self.db.mark_doc_qa_skipped(doc["id"], f"low_quality_{quality:.2f}")
+                result["skipped"] = 1
                 return result
 
             # extract_car_info once; pass into generate so the prompt also benefits
@@ -374,7 +380,7 @@ Return ONLY a valid JSON array, no markdown, no commentary:
 
     async def process_batch(self) -> dict:
         """Process pending documents concurrently up to `self.concurrency` Ollama calls."""
-        stats = {"processed": 0, "qa_generated": 0, "failed": 0}
+        stats = {"processed": 0, "qa_generated": 0, "failed": 0, "skipped_docs": 0}
 
         if not await self.check_ollama_health():
             logger.error("ollama_not_ready_skipping_batch")
@@ -402,6 +408,7 @@ Return ONLY a valid JSON array, no markdown, no commentary:
                 stats["processed"] += r["processed"]
                 stats["qa_generated"] += r["qa_generated"]
                 stats["failed"] += r["failed"]
+                stats["skipped_docs"] += r.get("skipped", 0)
 
         logger.info("qa_batch_complete", **stats)
         return stats

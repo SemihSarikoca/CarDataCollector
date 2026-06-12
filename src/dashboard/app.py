@@ -9,6 +9,7 @@ worker thread.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import signal
@@ -1092,6 +1093,9 @@ def scrape_status():
 @app.route("/api/scrape/start", methods=["POST"])
 def scrape_start():
     result = _scrape_mgr.start("scrape-loop")
+    if result.get("ok") and _clear_pause_flag():
+        result["resumed_pause"] = True
+        result["message"] = (result.get("message") or "") + " — stale pause flag cleared"
     code = 409 if not result["ok"] and "already running" in result.get("error", "") else (500 if not result["ok"] else 200)
     return jsonify(result), code
 
@@ -1122,6 +1126,9 @@ def qa_loop_status():
 @app.route("/api/qa-loop/start", methods=["POST"])
 def qa_loop_start():
     result = _qa_loop_mgr.start("qa-loop")
+    if result.get("ok") and _clear_pause_flag():
+        result["resumed_pause"] = True
+        result["message"] = (result.get("message") or "") + " — stale pause flag cleared"
     code = 409 if not result["ok"] and "already running" in result.get("error", "") else (500 if not result["ok"] else 200)
     return jsonify(result), code
 
@@ -1145,6 +1152,44 @@ def qa_loop_logs():
 # =============================================================================
 
 _PIPELINE_PAUSE_KEY = "pipeline:paused"
+_HEARTBEAT_MODES = ("run", "scrape-loop", "qa-loop")
+
+
+def _read_heartbeats() -> dict:
+    """Read pipeline:heartbeat:<mode> keys published by orchestrator processes.
+    This is the only way to see the Docker collector — it runs in another
+    container, invisible to this process's PID files."""
+    out = {m: None for m in _HEARTBEAT_MODES}
+    rc = _state["redis_client"]
+    if not rc:
+        return out
+    for mode in _HEARTBEAT_MODES:
+        try:
+            raw = rc.get(f"pipeline:heartbeat:{mode}")
+            if not raw:
+                continue
+            hb = json.loads(raw)
+            ts = hb.get("ts")
+            if ts:
+                age = (datetime.now(timezone.utc) - datetime.fromisoformat(ts)).total_seconds()
+                hb["age_seconds"] = max(0, int(age))
+            out[mode] = hb
+        except Exception:
+            continue
+    return out
+
+
+def _clear_pause_flag() -> bool:
+    """Delete the global pause flag; True if it was set. Start buttons call
+    this — otherwise a freshly started loop silently blocks on a stale pause
+    flag while the UI claims it is running."""
+    rc = _state["redis_client"]
+    if not rc:
+        return False
+    try:
+        return bool(rc.delete(_PIPELINE_PAUSE_KEY))
+    except Exception:
+        return False
 
 
 @app.route("/api/pipeline/paused")
@@ -1250,6 +1295,7 @@ def pipeline_overview():
         except Exception:
             pass
 
+    heartbeats = _read_heartbeats()
     out: dict = {
         "server_time": datetime.now(timezone.utc).isoformat(),
         "pipeline": {
@@ -1262,6 +1308,7 @@ def pipeline_overview():
         },
         "scrape_loop": _scrape_mgr.status(),
         "qa_loop": _qa_loop_mgr.status(),
+        "heartbeats": heartbeats,
         "latest_round": None,
         "enabled_sources": 0,
         "stats": None,
@@ -1303,6 +1350,10 @@ def pipeline_overview():
                 (SELECT COUNT(*) FROM qa_pairs) AS total_qa_pairs,
                 (SELECT COUNT(*) FROM scraped_data
                    WHERE is_duplicate = false AND qa_count = 0) AS pending_qa,
+                (SELECT COUNT(*) FROM scraped_data
+                   WHERE pipeline_stage IN ('deduplicated','quality_checked','stored')
+                     AND is_duplicate = false AND qa_count = 0
+                     AND word_count >= 20 AND content_length >= 100) AS qa_eligible,
                 (SELECT MAX(date_scraped) FROM scraped_data) AS last_scrape,
                 (SELECT COUNT(*) FROM scraped_data
                    WHERE date_scraped >= NOW() - INTERVAL '10 minutes') AS docs_last_10min
@@ -1311,6 +1362,9 @@ def pipeline_overview():
             "unique_documents": int(s.get("unique_documents") or 0),
             "total_qa_pairs": int(s.get("total_qa_pairs") or 0),
             "pending_qa_documents": int(s.get("pending_qa") or 0),
+            # Same predicate as get_documents_for_qa — what the Q/A loop will
+            # actually pick up. 0 here explains a Q/A loop producing nothing.
+            "qa_eligible_documents": int(s.get("qa_eligible") or 0),
             "last_scrape": s["last_scrape"].isoformat() if s.get("last_scrape") else None,
             "docs_last_10min": int(s.get("docs_last_10min") or 0),
         }
@@ -1333,7 +1387,11 @@ def pipeline_start():
     _PIPELINE_PID_FILE.write_text(f"{proc.pid}\nrun\n{datetime.now(timezone.utc).isoformat()}\n")
     with _pipeline_lock:
         _pipeline_state.update({"popen": proc, "started_at": datetime.now(timezone.utc).isoformat(), "command": "run"})
-    return jsonify({"ok": True, "pid": proc.pid, "message": "Pipeline started"})
+    out = {"ok": True, "pid": proc.pid, "message": "Pipeline started"}
+    if _clear_pause_flag():
+        out["resumed_pause"] = True
+        out["message"] += " — stale pause flag cleared"
+    return jsonify(out)
 
 
 @app.route("/api/pipeline/stop", methods=["POST"])

@@ -7,6 +7,8 @@ Sürekli çalışır, turlar halinde tekrar eder.
 """
 
 import asyncio
+import json
+import os
 import signal
 import time
 from datetime import datetime, timedelta, timezone
@@ -57,6 +59,12 @@ class PipelineOrchestrator:
         self._running = False
         self._start_time: Optional[float] = None
         self._current_round = 0
+        # Which loop this process runs ("run" | "scrape-loop" | "qa-loop").
+        # Used as the Redis heartbeat key suffix so the dashboard can tell
+        # the Docker pipeline and the dashboard-spawned loops apart.
+        self._mode = "run"
+        self._hb_state = "starting"
+        self._hb_task: Optional[asyncio.Task] = None
 
         # Bileşenleri oluştur (Postgres + Redis)
         self.db = DatabaseManager(config)
@@ -349,6 +357,40 @@ class PipelineOrchestrator:
         return round_stats
 
     _PAUSE_KEY = "pipeline:paused"
+    _HEARTBEAT_TTL = 180  # key self-expires if the process dies
+
+    async def _heartbeat(self, state: Optional[str] = None):
+        """Publish liveness + current state to Redis. The dashboard runs in a
+        separate container and cannot see this process via PID files — this
+        key is the only honest way for it to show whether the Docker pipeline
+        is running, paused or sleeping between rounds."""
+        if state is not None:
+            self._hb_state = state
+        if not self.cache.connected:
+            return
+        try:
+            payload = json.dumps({
+                "state": self._hb_state,
+                "mode": self._mode,
+                "round": self._current_round,
+                "pid": os.getpid(),
+                "ts": datetime.now(timezone.utc).isoformat(),
+            })
+            await self.cache._client.set(
+                f"pipeline:heartbeat:{self._mode}", payload, ex=self._HEARTBEAT_TTL
+            )
+        except Exception:
+            pass
+
+    async def _heartbeat_refresher(self):
+        """Re-publish the last state every 60s — a scrape round can run for
+        hours, far past the heartbeat TTL, and must not look dead meanwhile."""
+        while self._running:
+            await self._heartbeat()
+            await asyncio.sleep(60)
+
+    def _start_heartbeat_task(self):
+        self._hb_task = asyncio.create_task(self._heartbeat_refresher())
 
     async def _is_paused(self) -> bool:
         if not self.cache.connected:
@@ -365,26 +407,42 @@ class PipelineOrchestrator:
             if first:
                 logger.info("pipeline_paused")
                 first = False
+            await self._heartbeat("paused")
             await asyncio.sleep(5)
         if not first:
             logger.info("pipeline_resumed")
+
+    async def _sleep_between_rounds(self, seconds: float):
+        """Sleep in 30s chunks instead of one multi-hour asyncio.sleep, so
+        heartbeats keep flowing and a pause/stop takes effect within seconds
+        instead of at the end of the round delay."""
+        deadline = time.time() + seconds
+        while self._running:
+            remaining = deadline - time.time()
+            if remaining <= 0 or await self._is_paused():
+                break
+            await self._heartbeat("sleeping")
+            await asyncio.sleep(min(30, remaining))
 
     async def run_scrape_only_continuous(self):
         """Scrape-only 7/24 loop — fetches + stores + deduplicates, no Q/A generation."""
         self._running = True
         self._start_time = time.time()
+        self._mode = "scrape-loop"
 
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, lambda: self._shutdown())
 
         logger.info("scrape_loop_started", round_delay=self.round_delay)
+        self._start_heartbeat_task()
 
         while self._running:
             try:
                 await self._wait_while_paused()
                 if not self._running:
                     break
+                await self._heartbeat("running")
                 self._current_round += 1
                 round_number = self._current_round
                 await self.db.start_round(round_number)
@@ -406,7 +464,7 @@ class PipelineOrchestrator:
                     break
 
                 logger.info("scrape_loop_waiting", delay_seconds=self.round_delay)
-                await asyncio.sleep(self.round_delay)
+                await self._sleep_between_rounds(self.round_delay)
 
             except asyncio.CancelledError:
                 logger.info("scrape_loop_cancelled")
@@ -425,26 +483,31 @@ class PipelineOrchestrator:
         """Q/A-only 7/24 loop — continuously processes pending documents through Ollama."""
         self._running = True
         self._start_time = time.time()
+        self._mode = "qa-loop"
 
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, lambda: self._shutdown())
 
         logger.info("qa_loop_started", min_docs=self.min_docs_for_qa)
+        self._start_heartbeat_task()
 
         while self._running:
             try:
                 await self._wait_while_paused()
                 if not self._running:
                     break
+                await self._heartbeat("running")
                 stats = await self.run_qa_round()
 
                 if not self._running:
                     break
 
                 if stats.get("skipped"):
+                    await self._heartbeat("idle")
                     await asyncio.sleep(60)
                 elif not stats.get("qa_generated"):
+                    await self._heartbeat("idle")
                     await asyncio.sleep(30)
                 # else: loop immediately for next batch
 
@@ -472,6 +535,7 @@ class PipelineOrchestrator:
         logger.info("continuous_pipeline_started",
                    round_delay=self.round_delay,
                    max_workers=self.max_workers)
+        self._start_heartbeat_task()
 
         while self._running:
             try:
@@ -479,6 +543,7 @@ class PipelineOrchestrator:
                 if not self._running:
                     break
 
+                await self._heartbeat("running")
                 round_stats = await self.run_single_round()
 
                 if not self._running:
@@ -487,7 +552,7 @@ class PipelineOrchestrator:
                 # Tur arası bekleme
                 logger.info("round_waiting", delay_seconds=self.round_delay,
                            next_round=self._current_round + 1)
-                await asyncio.sleep(self.round_delay)
+                await self._sleep_between_rounds(self.round_delay)
 
             except asyncio.CancelledError:
                 logger.info("pipeline_cancelled")
@@ -509,6 +574,16 @@ class PipelineOrchestrator:
 
     async def _cleanup(self):
         """Temizlik"""
+        if self._hb_task:
+            self._hb_task.cancel()
+            self._hb_task = None
+        # Drop the heartbeat key so the dashboard shows "stopped" immediately
+        # instead of waiting out the TTL.
+        if self.cache.connected:
+            try:
+                await self.cache._client.delete(f"pipeline:heartbeat:{self._mode}")
+            except Exception:
+                pass
         await self.qa_generator.close()
         await self.cache.close()
         await self.db.close()

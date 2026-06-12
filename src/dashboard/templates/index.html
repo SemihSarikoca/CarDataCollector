@@ -1625,8 +1625,18 @@ async function fetchOverview() {
   } catch(e) { console.error(e); }
 }
 
+// Human label for a heartbeat state published by the orchestrator
+function hbStateText(hb) {
+  if (!hb) return '';
+  return { running: 'working', paused: 'paused', sleeping: 'sleeping until next round',
+           idle: 'idle — waiting for documents', starting: 'starting' }[hb.state] || hb.state;
+}
+
 function renderOverview(o) {
   const p = o.pipeline || {}, sc = o.scrape_loop || {}, qa = o.qa_loop || {};
+  const hbs = o.heartbeats || {};
+  const hbRun = hbs['run'];
+  const dockerRunning = !!hbRun && !p.running;  // a `run` orchestrator alive outside this container
   const r = o.latest_round, st = o.stats || {};
   const roundRunning = !!(r && r.status === 'running');
   const procRunning = !!p.running, single = !!p.single_round_running;
@@ -1641,12 +1651,18 @@ function renderOverview(o) {
   const itemsFlowing = (Date.now() - activityProbe.changedAt < 120000)
     || (st.docs_last_10min || 0) > 0;
 
-  // continuous pipeline block
-  setDot('heroProcDot', procRunning || single ? 'dot-amber' : 'dot-gray');
-  set('heroProcText', procRunning ? 'Running' : single ? 'Single Round' : 'Stopped');
+  // continuous pipeline block — PID file covers dashboard-spawned processes,
+  // the Redis heartbeat covers the Docker collector (separate container)
+  setDot('heroProcDot', (procRunning || single || dockerRunning) ? 'dot-amber' : 'dot-gray');
+  set('heroProcText', procRunning ? 'Running'
+    : single ? 'Single Round'
+    : dockerRunning ? (p.paused ? 'Docker — paused' : 'Running (Docker)')
+    : 'Stopped');
   $('heroProcMeta').innerHTML = procRunning
     ? `PID <b>${p.pid}</b> · cmd <b>${esc(p.command || 'run')}</b><br>started ${relSpan(p.started_at)}`
-    : single ? 'one-off round in progress' : 'not running — start it from the Pipeline tab';
+    : single ? 'one-off round in progress'
+    : dockerRunning ? `${esc(hbStateText(hbRun))} · round <b>${hbRun.round ?? '—'}</b><br>heartbeat ${hbRun.age_seconds != null ? hbRun.age_seconds + 's ago' : '—'}`
+    : 'not running — start it from the Pipeline tab';
 
   // round block
   if (!r) {
@@ -1682,12 +1698,13 @@ function renderOverview(o) {
   scrapeBits.push(`<b>${fmt(st.docs_last_10min || 0)}</b> items in last 10 min`);
   $('heroScrapeMeta').innerHTML = scrapeBits.join('<br>');
 
-  // Q/A loop block
+  // Q/A loop block — "eligible" = what the Q/A queue query will actually
+  // return; 0 eligible explains a running loop that produces nothing
   setDot('heroQADot', qa.running ? 'dot-amber' : 'dot-gray');
   set('heroQAText', qa.running ? 'Running' : 'Idle');
   $('heroQAMeta').innerHTML =
     (qa.running ? `PID <b>${qa.pid}</b> · started ${relSpan(qa.started_at)}<br>` : '')
-    + `<b>${fmt(st.total_qa_pairs || 0)}</b> pairs · <b>${fmt(st.pending_qa_documents || 0)}</b> docs pending`;
+    + `<b>${fmt(st.total_qa_pairs || 0)}</b> pairs · <b>${fmt(st.qa_eligible_documents ?? st.pending_qa_documents ?? 0)}</b> docs eligible`;
 
   // round metric chips — live counters while running, totals when done
   if (r) {
@@ -1732,7 +1749,7 @@ function renderOverview(o) {
     if (el) el.style.display = p.paused ? 'inline-flex' : 'none';
   });
   // main pill shows activity; the separate Paused badge covers pause state
-  const active = procRunning || single || roundRunning || sc.running || qa.running;
+  const active = procRunning || single || roundRunning || sc.running || qa.running || dockerRunning;
   const pillCls = active ? 'pill ok running' : 'pill bad';
   const pillTxt = active ? 'Active' : 'Idle';
   [$('heroStatePill'), $('pipelinePill')].forEach(el => {
@@ -1742,28 +1759,43 @@ function renderOverview(o) {
 
 function applyControlState(o) {
   const p = o.pipeline || {}, sc = o.scrape_loop || {}, qa = o.qa_loop || {};
+  const hbs = o.heartbeats || {};
+  const st = o.stats || {};
+  const hbRun = hbs['run'];
+  const dockerRunning = !!hbRun && !p.running;
   const roundRunning = !!(o.latest_round && o.latest_round.status === 'running');
-  anythingRunning = !!(p.running || p.single_round_running || sc.running || qa.running || roundRunning);
+  anythingRunning = !!(p.running || p.single_round_running || sc.running || qa.running || roundRunning || dockerRunning);
 
-  // continuous pipeline card
-  setBtn('procStartBtn', !(p.running || p.single_round_running));
-  setBtn('procStopBtn', p.running);
-  setBtn('runSingleBtn', !(p.running || p.single_round_running));
+  // continuous pipeline card — the Docker collector is only visible via its
+  // Redis heartbeat; without it this card lies ("Stopped" while it runs)
+  const procAlive = p.running || p.single_round_running || dockerRunning;
+  setBtn('procStartBtn', !procAlive);
+  setBtn('procStopBtn', p.running);   // we can only stop processes we spawned
+  setBtn('runSingleBtn', !procAlive);
   const procPill = $('procPill');
   if (procPill) {
-    procPill.className = (p.running || p.single_round_running) ? 'pill ok running' : 'pill bad';
-    procPill.innerHTML = `<span class="dot"></span>${p.running ? 'Running' : p.single_round_running ? 'Single round' : 'Stopped'}`;
+    if (procAlive && p.paused) {
+      procPill.className = 'pill warn';
+      procPill.innerHTML = '<span class="dot"></span>Paused';
+    } else {
+      procPill.className = procAlive ? 'pill ok running' : 'pill bad';
+      procPill.innerHTML = `<span class="dot"></span>${p.running ? 'Running' : p.single_round_running ? 'Single round' : dockerRunning ? 'Running (Docker)' : 'Stopped'}`;
+    }
   }
-  setDot('procDot', (p.running || p.single_round_running) ? 'dot-amber' : 'dot-gray');
+  setDot('procDot', procAlive ? 'dot-amber' : 'dot-gray');
   const procLabel = $('procLabel'), procMeta = $('procMeta');
   if (procLabel) procLabel.textContent = p.running
     ? `Running  PID ${p.pid}`
-    : p.single_round_running ? 'Single round in progress' : 'Stopped';
+    : p.single_round_running ? 'Single round in progress'
+    : dockerRunning ? `Running in Docker — ${hbStateText(hbRun)}`
+    : 'Stopped';
   if (procMeta) procMeta.innerHTML = (p.running && p.started_at)
     ? `started ${relSpan(p.started_at)}`
+    : dockerRunning ? `round ${hbRun.round ?? '—'} · heartbeat ${hbRun.age_seconds != null ? hbRun.age_seconds + 's ago' : '—'}`
     : 'Scrape → dedup → Q/A rounds in a loop (python -m src.main run)';
 
-  // pause / resume
+  // pause / resume — persistent banner while paused so a stale pause flag
+  // can never silently block everything again
   setBtn('pauseBtn', !p.paused);
   setBtn('resumeBtn', p.paused);
   const pausePill = $('pauseStatusPill');
@@ -1773,28 +1805,47 @@ function applyControlState(o) {
   }
   $('topbarPauseBtn')?.classList.toggle('show', !p.paused);
   $('topbarResumeBtn')?.classList.toggle('show', p.paused);
+  if (p.paused) {
+    showBanner('pauseBanner', 'warn',
+      '<i class="bi bi-exclamation-triangle"></i> <b>Global pause is ON</b> — the Docker pipeline and ALL scrape/Q/A loops are blocked. ' +
+      'Press <b>Resume</b> (or any Start button, which clears the pause automatically).');
+  } else {
+    const pb = $('pauseBanner');
+    if (pb) pb.className = 'banner';   // hide once resumed
+  }
 
   // loop cards
   applyLoopCard(sc, { dot:'scrapeDot', label:'scrapeLabel', meta:'scrapeMeta', pill:'scrapePill',
-    start:'scrapeStartBtn', stop:'scrapeStopBtn', idleMeta:'Fetches & stores documents from all sources' });
+    start:'scrapeStartBtn', stop:'scrapeStopBtn', idleMeta:'Fetches & stores documents from all sources' },
+    { paused: p.paused, hb: !sc.running ? hbs['scrape-loop'] : null });
+  const elig = st.qa_eligible_documents;
   applyLoopCard(qa, { dot:'qaLoopDot', label:'qaLoopLabel', meta:'qaLoopMeta', pill:'qaLoopPill',
-    start:'qaLoopStartBtn', stop:'qaLoopStopBtn', idleMeta:'Generates Q/A pairs via Ollama continuously' });
+    start:'qaLoopStartBtn', stop:'qaLoopStopBtn', idleMeta:'Generates Q/A pairs via Ollama continuously' },
+    { paused: p.paused, hb: !qa.running ? hbs['qa-loop'] : null,
+      extra: elig != null ? `<b>${fmt(elig)}</b> docs eligible for Q/A` : null });
 }
 
-function applyLoopCard(s, ids) {
+function applyLoopCard(s, ids, opts = {}) {
   const dot = $(ids.dot), label = $(ids.label), meta = $(ids.meta), pill = $(ids.pill);
   if (!dot || !label || !meta || !pill) return;
-  if (s.running) {
+  const hb = opts.hb || null;           // heartbeat from a process outside this container
+  const running = s.running || !!hb;
+  const blocked = running && opts.paused;
+  const extra = opts.extra ? ` · ${opts.extra}` : '';
+  if (running) {
     dot.className = 'status-dot dot-amber';
-    label.textContent = `Running  PID ${s.pid}`;
-    meta.innerHTML = `started ${relSpan(s.started_at)}`;
-    pill.className = 'pill ok running';
-    pill.innerHTML = '<span class="dot"></span>Running';
-    setBtn(ids.start, false); setBtn(ids.stop, true);
+    label.textContent = s.running
+      ? `Running  PID ${s.pid}${blocked ? ' — blocked by pause' : ''}`
+      : `Running (external) — ${hbStateText(hb)}`;
+    meta.innerHTML = (s.running ? `started ${relSpan(s.started_at)}` :
+      `heartbeat ${hb.age_seconds != null ? hb.age_seconds + 's ago' : '—'}`) + extra;
+    pill.className = blocked ? 'pill warn' : 'pill ok running';
+    pill.innerHTML = `<span class="dot"></span>${blocked ? 'Paused' : 'Running'}`;
+    setBtn(ids.start, false); setBtn(ids.stop, s.running);
   } else {
     dot.className = 'status-dot dot-gray';
     label.textContent = 'Stopped';
-    meta.textContent = ids.idleMeta;
+    meta.innerHTML = esc(ids.idleMeta) + extra;
     pill.className = 'pill bad';
     pill.innerHTML = '<span class="dot"></span>Idle';
     setBtn(ids.start, true); setBtn(ids.stop, false);
@@ -1808,6 +1859,7 @@ async function pipelineStart() {
     const r = await fetch('/api/pipeline/start', { method: 'POST' });
     const d = await r.json();
     toast(d.ok ? 'success' : 'error', d.ok ? `Pipeline started (PID ${d.pid})` : (d.error || 'Failed'));
+    if (d.resumed_pause) toast('info', 'Stale pause flag cleared — loops unblocked');
     showBanner('procBanner', d.ok ? 'success' : 'error', d.message || d.error || '');
   } catch(e) { toast('error', 'Start failed: ' + esc(e.message)); }
   setTimeout(fetchOverview, 600);
@@ -2269,6 +2321,7 @@ async function scrapeStart() {
     const r = await fetch('/api/scrape/start', { method: 'POST' });
     const d = await r.json();
     toast(d.ok ? 'success' : 'warn', d.ok ? `Scrape loop started (PID ${d.pid})` : (d.error || 'Failed'));
+    if (d.resumed_pause) toast('info', 'Stale pause flag cleared — loops unblocked');
     showBanner('scrapeBanner', d.ok ? 'success' : 'warn', d.message || d.error || '');
     setTimeout(fetchLogs, 1200);
   } catch(e) { toast('error', 'Start failed: ' + esc(e.message)); }
@@ -2297,6 +2350,7 @@ async function qaLoopStart() {
     const r = await fetch('/api/qa-loop/start', { method: 'POST' });
     const d = await r.json();
     toast(d.ok ? 'success' : 'warn', d.ok ? `Q/A loop started (PID ${d.pid})` : (d.error || 'Failed'));
+    if (d.resumed_pause) toast('info', 'Stale pause flag cleared — loops unblocked');
     showBanner('qaLoopBanner', d.ok ? 'success' : 'warn', d.message || d.error || '');
   } catch(e) { toast('error', 'Start failed: ' + esc(e.message)); }
   setTimeout(fetchOverview, 600);

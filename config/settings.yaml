@@ -524,9 +524,9 @@ sources:
     use_playwright: false
     cloudflare_protected: true
     selectors:
-      article_list: "a[href*='/p/'], td a, .code-list a"
+      article_list: "a[href*='-codes'], a[href*='/trouble_codes/obd-']"
       article_title: "h1"
-      article_content: "div#content, div.content, article, main"
+      article_content: "div.main, div#content, div.content, article, main"
       pagination_next: "a.next, a[rel='next']"
 
   - name: "autocodes"
@@ -554,9 +554,9 @@ sources:
   # =========================================================================
   - name: "thecarconnection"
     type: "content"
-    # Disabled 2026-06: CF 403 on every fetch and content is car news/reviews —
-    # low Q/A value next to technical sources; not worth FlareSolverr budget.
-    enabled: false
+    # Re-enabled 2026-06-14: loads via Playwright (no FlareSolverr budget needed);
+    # content fix below. Lower Q/A value (car news/reviews) than technical sources.
+    enabled: true
     base_url: "https://www.thecarconnection.com"
     start_urls:
       - "https://www.thecarconnection.com/news/"
@@ -571,7 +571,7 @@ sources:
     selectors:
       article_list: "h3 a, h2 a, a[href*='/news/'], a[href*='/car-reviews/']"
       article_title: "h1"
-      article_content: "div.article-body, div.content, article"
+      article_content: "div.article-content, div#main-column, div#content, article"
       article_date: "time"
       pagination_next: "a.next, a[rel='next']"
 
